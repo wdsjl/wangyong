@@ -11,6 +11,7 @@
 - **智能信号**：多因子评分，输出强烈买入 / 买入 / 观望 / 卖出 / 强烈卖出
 - **批量分析**：支持同时分析多只股票并排序
 - **股票搜索**：按代码或名称快速检索
+- **Web 面板**：K 线、MACD、RSI、布林带可视化与信号看板
 
 ## 快速开始
 
@@ -47,6 +48,23 @@ python main.py search 600519
 python main.py batch 600519 000001 300750 --days 120
 ```
 
+### 5. 启动 Web 可视化面板
+
+```bash
+# 演示模式（推荐）
+python web_main.py --demo --port 8000
+
+# 实时行情模式
+python web_main.py --port 8000
+```
+
+浏览器访问 `http://127.0.0.1:8000`，即可使用：
+
+- 股票搜索与单股分析
+- K 线 + 均线图
+- MACD / RSI / 布林带 / 成交量切换
+- 信号评分卡与自选股批量看板
+
 ## 评分逻辑
 
 系统从四个维度综合评分（范围约 -2 ~ +2）：
@@ -76,8 +94,14 @@ smart_stock/
 ├── data.py        # 行情数据获取
 ├── indicators.py  # 技术指标计算
 ├── models.py      # 数据模型
-└── strategy.py    # 交易策略与信号
-main.py            # 入口脚本
+├── serializers.py # API 序列化
+├── service.py     # Web 服务层
+├── strategy.py    # 交易策略与信号
+└── web/           # Web 面板
+    ├── app.py
+    └── static/
+main.py            # CLI 入口
+web_main.py        # Web 入口
 ```
 
 ## 自定义参数
@@ -92,7 +116,6 @@ main.py            # 入口脚本
 
 - 接入大模型解读财报与新闻情绪
 - 策略回测与收益统计
-- Web 可视化面板
 - 自选股监控与告警
 
 ## License
