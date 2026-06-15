@@ -3,6 +3,9 @@ const state = {
   currentCode: "600519",
   chartData: null,
   activeIndicator: "macd",
+  showBollinger: false,
+  hoverIndex: null,
+  zoomRange: null,
   priceChart: null,
   indicatorChart: null,
 };
@@ -27,6 +30,9 @@ const elements = {
   watchInput: document.getElementById("watchInput"),
   batchBtn: document.getElementById("batchBtn"),
   watchlist: document.getElementById("watchlist"),
+  showBollToggle: document.getElementById("showBollToggle"),
+  resetZoomBtn: document.getElementById("resetZoomBtn"),
+  crosshairInfo: document.getElementById("crosshairInfo"),
 };
 
 const signalClassMap = {
@@ -56,7 +62,34 @@ const chartColors = {
   histNeg: "#ef4444",
   rsi: "#c084fc",
   volume: "#64748b",
+  crosshair: "rgba(148, 163, 184, 0.55)",
 };
+
+const crosshairPlugin = {
+  id: "crosshair",
+  afterDraw(chart) {
+    if (state.hoverIndex == null) return;
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+
+    const x = xScale.getPixelForValue(state.hoverIndex);
+    const { top, bottom } = chart.chartArea;
+    if (x < chart.chartArea.left || x > chart.chartArea.right) return;
+
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = chartColors.crosshair;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+Chart.register(crosshairPlugin);
 
 async function api(path) {
   const response = await fetch(path);
@@ -76,6 +109,13 @@ function formatPrice(value) {
   return Number(value).toFixed(2);
 }
 
+function formatVolume(value) {
+  if (value == null) return "-";
+  if (value >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
+  if (value >= 10000) return `${(value / 10000).toFixed(2)}万`;
+  return String(value);
+}
+
 function scoreToWidth(score) {
   const normalized = Math.max(-2, Math.min(2, score));
   return `${((normalized + 2) / 4) * 100}%`;
@@ -85,6 +125,55 @@ function scoreToColor(score) {
   if (score >= 0.6) return chartColors.histPos;
   if (score <= -0.6) return chartColors.histNeg;
   return chartColors.middle;
+}
+
+function defaultZoomRange(length, windowSize = 60) {
+  if (length <= windowSize) return { min: 0, max: length - 1 };
+  return { min: length - windowSize, max: length - 1 };
+}
+
+function applyZoomRange(options, range) {
+  options.scales.x.min = range.min;
+  options.scales.x.max = range.max;
+}
+
+function syncZoomFrom(sourceChart) {
+  const { min, max } = sourceChart.scales.x;
+  state.zoomRange = { min, max };
+  const target = sourceChart.canvas.id === "priceChart" ? state.indicatorChart : state.priceChart;
+  if (!target) return;
+  target.options.scales.x.min = min;
+  target.options.scales.x.max = max;
+  target.update("none");
+}
+
+function resetZoom() {
+  if (!state.chartData) return;
+  state.zoomRange = defaultZoomRange(state.chartData.dates.length);
+  [state.priceChart, state.indicatorChart].forEach((chart) => {
+    if (!chart) return;
+    applyZoomRange(chart.options, state.zoomRange);
+    chart.update("none");
+  });
+}
+
+function buildZoomOptions() {
+  return {
+    pan: {
+      enabled: true,
+      mode: "x",
+      onPanComplete: ({ chart }) => syncZoomFrom(chart),
+    },
+    zoom: {
+      wheel: { enabled: true, speed: 0.08 },
+      pinch: { enabled: true },
+      mode: "x",
+      onZoomComplete: ({ chart }) => syncZoomFrom(chart),
+    },
+    limits: {
+      x: { min: "original", max: "original" },
+    },
+  };
 }
 
 function renderSearchResults(items) {
@@ -119,6 +208,9 @@ function renderSearchResults(items) {
 function renderAnalysis(payload) {
   const { analysis } = payload;
   state.chartData = payload.chart;
+  state.zoomRange = defaultZoomRange(state.chartData.dates.length);
+  state.hoverIndex = null;
+  elements.crosshairInfo.textContent = "移动鼠标到图表上查看十字光标数据";
 
   elements.stockTitle.textContent = `${analysis.name} (${analysis.code})`;
   elements.latestPrice.textContent = formatPrice(analysis.latest_price);
@@ -191,7 +283,7 @@ function destroyChart(chart) {
 }
 
 function baseChartOptions(extra = {}) {
-  return {
+  const options = {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: "index", intersect: false },
@@ -201,6 +293,11 @@ function baseChartOptions(extra = {}) {
       },
       tooltip: {
         callbacks: {
+          title(items) {
+            const chart = state.chartData;
+            if (!chart || !items.length) return "";
+            return chart.dates[items[0].dataIndex] || "";
+          },
           label(context) {
             if (context.dataset.type === "candlestick") {
               const raw = context.raw;
@@ -212,15 +309,19 @@ function baseChartOptions(extra = {}) {
               ];
             }
             const value = context.parsed.y;
+            if (context.dataset.label === "成交量") {
+              return `${context.dataset.label}: ${formatVolume(value)}`;
+            }
             return `${context.dataset.label}: ${value == null ? "-" : formatPrice(value)}`;
           },
         },
       },
+      zoom: buildZoomOptions(),
       ...extra.plugins,
     },
     scales: {
       x: {
-        ticks: { color: "#94a3b8", maxTicksLimit: 8 },
+        ticks: { color: "#94a3b8", maxTicksLimit: 10 },
         grid: { color: "rgba(148, 163, 184, 0.08)" },
       },
       y: {
@@ -230,6 +331,11 @@ function baseChartOptions(extra = {}) {
       ...extra.scales,
     },
   };
+
+  if (state.zoomRange) {
+    applyZoomRange(options, state.zoomRange);
+  }
+  return options;
 }
 
 function buildCandlestickData(chart) {
@@ -253,17 +359,148 @@ function buildVolumeColors(chart) {
   });
 }
 
-function buildMaLineDataset(label, data, color) {
+function buildLineDataset(label, data, color, dashed = false) {
   return {
     type: "line",
     label,
     data,
     borderColor: color,
     backgroundColor: color,
-    borderWidth: 1.5,
+    borderWidth: dashed ? 1 : 1.5,
+    borderDash: dashed ? [5, 4] : [],
     pointRadius: 0,
     tension: 0.2,
     spanGaps: true,
+  };
+}
+
+function buildPriceDatasets(chart) {
+  const datasets = [
+    {
+      type: "candlestick",
+      label: "K线",
+      data: buildCandlestickData(chart),
+      color: {
+        up: chartColors.candleUp,
+        down: chartColors.candleDown,
+        unchanged: "#94a3b8",
+      },
+      borderColor: {
+        up: chartColors.candleBorderUp,
+        down: chartColors.candleBorderDown,
+        unchanged: "#94a3b8",
+      },
+    },
+    buildLineDataset("MA5", chart.ma5, chartColors.ma5),
+    buildLineDataset("MA10", chart.ma10, chartColors.ma10),
+    buildLineDataset("MA20", chart.ma20, chartColors.ma20),
+    buildLineDataset("MA60", chart.ma60, chartColors.ma60),
+  ];
+
+  if (state.showBollinger) {
+    datasets.push(
+      buildLineDataset("BOLL 上轨", chart.boll_upper, chartColors.upper, true),
+      buildLineDataset("BOLL 中轨", chart.boll_middle, chartColors.middle),
+      buildLineDataset("BOLL 下轨", chart.boll_lower, chartColors.lower, true)
+    );
+  }
+
+  return datasets;
+}
+
+function getIndicatorSummary(index) {
+  const chart = state.chartData;
+  if (!chart || index == null) return [];
+
+  const summaries = {
+    macd: [
+      ["MACD", chart.macd[index]],
+      ["信号", chart.macd_signal[index]],
+      ["柱", chart.macd_hist[index]],
+    ],
+    rsi: [["RSI", chart.rsi[index]]],
+    boll: [
+      ["上轨", chart.boll_upper[index]],
+      ["中轨", chart.boll_middle[index]],
+      ["下轨", chart.boll_lower[index]],
+    ],
+    volume: [["成交量", chart.volume[index], true]],
+  };
+
+  return summaries[state.activeIndicator] || [];
+}
+
+function updateCrosshairInfo(index) {
+  const chart = state.chartData;
+  if (!chart || index == null) {
+    elements.crosshairInfo.textContent = "移动鼠标到图表上查看十字光标数据";
+    return;
+  }
+
+  const parts = [
+    chart.dates[index],
+    `开 ${formatPrice(chart.open[index])}`,
+    `高 ${formatPrice(chart.high[index])}`,
+    `低 ${formatPrice(chart.low[index])}`,
+    `收 ${formatPrice(chart.close[index])}`,
+    `MA20 ${formatPrice(chart.ma20[index])}`,
+  ];
+
+  getIndicatorSummary(index).forEach(([label, value, isVolume]) => {
+    parts.push(`${label} ${isVolume ? formatVolume(value) : formatPrice(value)}`);
+  });
+
+  elements.crosshairInfo.textContent = parts.join("  |  ");
+}
+
+function setHoverIndex(index) {
+  if (state.hoverIndex === index) return;
+  state.hoverIndex = index;
+  updateCrosshairInfo(index);
+  syncActiveElements(index);
+  state.priceChart?.update("none");
+  state.indicatorChart?.update("none");
+}
+
+function clearHoverIndex() {
+  state.hoverIndex = null;
+  updateCrosshairInfo(null);
+  [state.priceChart, state.indicatorChart].forEach((chart) => {
+    if (!chart) return;
+    chart.setActiveElements([]);
+    chart.tooltip?.setActiveElements([], { x: 0, y: 0 });
+    chart.update("none");
+  });
+}
+
+function syncActiveElements(index) {
+  [state.priceChart, state.indicatorChart].forEach((chart) => {
+    if (!chart || index == null) return;
+    const activeElements = chart.data.datasets.map((_, datasetIndex) => ({
+      datasetIndex,
+      index,
+    }));
+    chart.setActiveElements(activeElements);
+    chart.tooltip?.setActiveElements(activeElements, { x: 0, y: 0 });
+  });
+}
+
+function attachChartInteractions(chart) {
+  if (!chart) return;
+
+  chart.canvas.onmousemove = (event) => {
+    const elementsAtEvent = chart.getElementsAtEventForMode(
+      event,
+      "index",
+      { intersect: false },
+      false
+    );
+    if (!elementsAtEvent.length) return;
+    setHoverIndex(elementsAtEvent[0].index);
+  };
+
+  chart.canvas.onmouseleave = () => {
+    clearHoverIndex();
   };
 }
 
@@ -279,33 +516,16 @@ function renderCharts() {
     type: "candlestick",
     data: {
       labels: chart.dates,
-      datasets: [
-        {
-          type: "candlestick",
-          label: "K线",
-          data: buildCandlestickData(chart),
-          color: {
-            up: chartColors.candleUp,
-            down: chartColors.candleDown,
-            unchanged: "#94a3b8",
-          },
-          borderColor: {
-            up: chartColors.candleBorderUp,
-            down: chartColors.candleBorderDown,
-            unchanged: "#94a3b8",
-          },
-        },
-        buildMaLineDataset("MA5", chart.ma5, chartColors.ma5),
-        buildMaLineDataset("MA10", chart.ma10, chartColors.ma10),
-        buildMaLineDataset("MA20", chart.ma20, chartColors.ma20),
-        buildMaLineDataset("MA60", chart.ma60, chartColors.ma60),
-      ],
+      datasets: buildPriceDatasets(chart),
     },
     options: baseChartOptions(),
   });
 
   const indicatorCtx = document.getElementById("indicatorChart");
   state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
+
+  attachChartInteractions(state.priceChart);
+  attachChartInteractions(state.indicatorChart);
 }
 
 function buildIndicatorConfig(chart, type) {
@@ -314,15 +534,18 @@ function buildIndicatorConfig(chart, type) {
       type: "line",
       data: {
         labels: chart.dates,
-        datasets: [{ label: "RSI", data: chart.rsi, borderColor: chartColors.rsi, tension: 0.2 }],
+        datasets: [buildLineDataset("RSI", chart.rsi, chartColors.rsi)],
       },
-      options: {
-        ...baseChartOptions(),
-        plugins: {
-          ...baseChartOptions().plugins,
-          annotation: {},
+      options: baseChartOptions({
+        scales: {
+          y: {
+            min: 0,
+            max: 100,
+            ticks: { color: "#94a3b8", stepSize: 20 },
+            grid: { color: "rgba(148, 163, 184, 0.08)" },
+          },
         },
-      },
+      }),
     };
   }
 
@@ -332,10 +555,10 @@ function buildIndicatorConfig(chart, type) {
       data: {
         labels: chart.dates,
         datasets: [
-          { label: "收盘价", data: chart.close, borderColor: chartColors.close, tension: 0.2 },
-          { label: "上轨", data: chart.boll_upper, borderColor: chartColors.upper, tension: 0.2 },
-          { label: "中轨", data: chart.boll_middle, borderColor: chartColors.middle, tension: 0.2 },
-          { label: "下轨", data: chart.boll_lower, borderColor: chartColors.lower, tension: 0.2 },
+          buildLineDataset("收盘价", chart.close, chartColors.close),
+          buildLineDataset("上轨", chart.boll_upper, chartColors.upper, true),
+          buildLineDataset("中轨", chart.boll_middle, chartColors.middle),
+          buildLineDataset("下轨", chart.boll_lower, chartColors.lower, true),
         ],
       },
       options: baseChartOptions(),
@@ -373,28 +596,52 @@ function buildIndicatorConfig(chart, type) {
           label: "MACD 柱",
           data: chart.macd_hist,
           backgroundColor: histColors,
-          yAxisID: "y",
         },
-        {
-          type: "line",
-          label: "MACD",
-          data: chart.macd,
-          borderColor: chartColors.macd,
-          tension: 0.2,
-          yAxisID: "y",
-        },
-        {
-          type: "line",
-          label: "信号线",
-          data: chart.macd_signal,
-          borderColor: chartColors.signal,
-          tension: 0.2,
-          yAxisID: "y",
-        },
+        buildLineDataset("MACD", chart.macd, chartColors.macd),
+        buildLineDataset("信号线", chart.macd_signal, chartColors.signal),
       ],
     },
     options: baseChartOptions(),
   };
+}
+
+function rerenderIndicatorChart() {
+  if (!state.chartData) return;
+  destroyChart(state.indicatorChart);
+  const indicatorCtx = document.getElementById("indicatorChart");
+  state.indicatorChart = new Chart(
+    indicatorCtx,
+    buildIndicatorConfig(state.chartData, state.activeIndicator)
+  );
+  if (state.zoomRange) {
+    applyZoomRange(state.indicatorChart.options, state.zoomRange);
+    state.indicatorChart.update("none");
+  }
+  attachChartInteractions(state.indicatorChart);
+  if (state.hoverIndex != null) {
+    syncActiveElements(state.hoverIndex);
+    updateCrosshairInfo(state.hoverIndex);
+    state.indicatorChart.update("none");
+  }
+}
+
+function rerenderPriceChart() {
+  if (!state.chartData) return;
+  destroyChart(state.priceChart);
+  const priceCtx = document.getElementById("priceChart");
+  state.priceChart = new Chart(priceCtx, {
+    type: "candlestick",
+    data: {
+      labels: state.chartData.dates,
+      datasets: buildPriceDatasets(state.chartData),
+    },
+    options: baseChartOptions(),
+  });
+  attachChartInteractions(state.priceChart);
+  if (state.hoverIndex != null) {
+    syncActiveElements(state.hoverIndex);
+    state.priceChart.update("none");
+  }
 }
 
 async function loadConfig() {
@@ -457,6 +704,11 @@ function bindEvents() {
   elements.searchBtn.addEventListener("click", searchStocks);
   elements.analyzeBtn.addEventListener("click", loadAnalysis);
   elements.batchBtn.addEventListener("click", loadBatch);
+  elements.resetZoomBtn.addEventListener("click", resetZoom);
+  elements.showBollToggle.addEventListener("change", (event) => {
+    state.showBollinger = event.target.checked;
+    rerenderPriceChart();
+  });
   elements.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchStocks();
   });
@@ -466,13 +718,9 @@ function bindEvents() {
       document.querySelectorAll(".chart-tabs button").forEach((node) => node.classList.remove("active"));
       button.classList.add("active");
       state.activeIndicator = button.dataset.chart;
-      if (state.chartData) {
-        destroyChart(state.indicatorChart);
-        const indicatorCtx = document.getElementById("indicatorChart");
-        state.indicatorChart = new Chart(
-          indicatorCtx,
-          buildIndicatorConfig(state.chartData, state.activeIndicator)
-        );
+      rerenderIndicatorChart();
+      if (state.hoverIndex != null) {
+        updateCrosshairInfo(state.hoverIndex);
       }
     });
   });
