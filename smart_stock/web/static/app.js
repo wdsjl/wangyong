@@ -39,6 +39,10 @@ const signalClassMap = {
 
 const chartColors = {
   close: "#38bdf8",
+  candleUp: "#ef4444",
+  candleDown: "#22c55e",
+  candleBorderUp: "#f87171",
+  candleBorderDown: "#34d399",
   ma5: "#f472b6",
   ma10: "#a78bfa",
   ma20: "#fbbf24",
@@ -186,7 +190,7 @@ function destroyChart(chart) {
   if (chart) chart.destroy();
 }
 
-function baseChartOptions() {
+function baseChartOptions(extra = {}) {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -195,6 +199,24 @@ function baseChartOptions() {
       legend: {
         labels: { color: "#cbd5e1" },
       },
+      tooltip: {
+        callbacks: {
+          label(context) {
+            if (context.dataset.type === "candlestick") {
+              const raw = context.raw;
+              return [
+                `开: ${formatPrice(raw.o)}`,
+                `高: ${formatPrice(raw.h)}`,
+                `低: ${formatPrice(raw.l)}`,
+                `收: ${formatPrice(raw.c)}`,
+              ];
+            }
+            const value = context.parsed.y;
+            return `${context.dataset.label}: ${value == null ? "-" : formatPrice(value)}`;
+          },
+        },
+      },
+      ...extra.plugins,
     },
     scales: {
       x: {
@@ -205,7 +227,43 @@ function baseChartOptions() {
         ticks: { color: "#94a3b8" },
         grid: { color: "rgba(148, 163, 184, 0.08)" },
       },
+      ...extra.scales,
     },
+  };
+}
+
+function buildCandlestickData(chart) {
+  return chart.dates.map((date, index) => ({
+    x: date,
+    o: chart.open[index],
+    h: chart.high[index],
+    l: chart.low[index],
+    c: chart.close[index],
+  }));
+}
+
+function buildVolumeColors(chart) {
+  return chart.dates.map((_, index) => {
+    const open = chart.open[index];
+    const close = chart.close[index];
+    if (open == null || close == null) {
+      return "rgba(148, 163, 184, 0.35)";
+    }
+    return close >= open ? "rgba(239, 68, 68, 0.72)" : "rgba(34, 197, 94, 0.72)";
+  });
+}
+
+function buildMaLineDataset(label, data, color) {
+  return {
+    type: "line",
+    label,
+    data,
+    borderColor: color,
+    backgroundColor: color,
+    borderWidth: 1.5,
+    pointRadius: 0,
+    tension: 0.2,
+    spanGaps: true,
   };
 }
 
@@ -218,15 +276,29 @@ function renderCharts() {
 
   const priceCtx = document.getElementById("priceChart");
   state.priceChart = new Chart(priceCtx, {
-    type: "line",
+    type: "candlestick",
     data: {
       labels: chart.dates,
       datasets: [
-        { label: "收盘价", data: chart.close, borderColor: chartColors.close, tension: 0.2 },
-        { label: "MA5", data: chart.ma5, borderColor: chartColors.ma5, tension: 0.2 },
-        { label: "MA10", data: chart.ma10, borderColor: chartColors.ma10, tension: 0.2 },
-        { label: "MA20", data: chart.ma20, borderColor: chartColors.ma20, tension: 0.2 },
-        { label: "MA60", data: chart.ma60, borderColor: chartColors.ma60, tension: 0.2 },
+        {
+          type: "candlestick",
+          label: "K线",
+          data: buildCandlestickData(chart),
+          color: {
+            up: chartColors.candleUp,
+            down: chartColors.candleDown,
+            unchanged: "#94a3b8",
+          },
+          borderColor: {
+            up: chartColors.candleBorderUp,
+            down: chartColors.candleBorderDown,
+            unchanged: "#94a3b8",
+          },
+        },
+        buildMaLineDataset("MA5", chart.ma5, chartColors.ma5),
+        buildMaLineDataset("MA10", chart.ma10, chartColors.ma10),
+        buildMaLineDataset("MA20", chart.ma20, chartColors.ma20),
+        buildMaLineDataset("MA60", chart.ma60, chartColors.ma60),
       ],
     },
     options: baseChartOptions(),
@@ -275,7 +347,13 @@ function buildIndicatorConfig(chart, type) {
       type: "bar",
       data: {
         labels: chart.dates,
-        datasets: [{ label: "成交量", data: chart.volume, backgroundColor: "rgba(100, 116, 139, 0.55)" }],
+        datasets: [
+          {
+            label: "成交量",
+            data: chart.volume,
+            backgroundColor: buildVolumeColors(chart),
+          },
+        ],
       },
       options: baseChartOptions(),
     };

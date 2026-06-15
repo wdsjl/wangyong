@@ -36,6 +36,9 @@ def test_api_analyze_demo():
     assert payload["analysis"]["code"] == "600519"
     assert len(payload["chart"]["dates"]) == 120
     assert "signal" in payload["analysis"]
+    for field in ("open", "high", "low", "close"):
+        assert field in payload["chart"]
+        assert len(payload["chart"][field]) == 120
 
 
 def test_api_batch_demo():

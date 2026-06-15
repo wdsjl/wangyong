@@ -262,6 +262,13 @@ button:disabled {
 
 .chart-card canvas {
   width: 100% !important;
+}
+
+#priceChart {
+  height: 360px !important;
+}
+
+#indicatorChart {
   height: 320px !important;
 }
 
