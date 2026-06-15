@@ -7,6 +7,7 @@ const state = {
   hoverIndex: null,
   zoomRange: null,
   keyboardNavEnabled: true,
+  watchlistCodes: [],
   priceChart: null,
   indicatorChart: null,
 };
@@ -29,8 +30,12 @@ const elements = {
   metricGrid: document.getElementById("metricGrid"),
   riskNote: document.getElementById("riskNote"),
   watchInput: document.getElementById("watchInput"),
+  addWatchBtn: document.getElementById("addWatchBtn"),
+  clearWatchBtn: document.getElementById("clearWatchBtn"),
   batchBtn: document.getElementById("batchBtn"),
   watchlist: document.getElementById("watchlist"),
+  watchlistChips: document.getElementById("watchlistChips"),
+  watchlistCount: document.getElementById("watchlistCount"),
   showBollToggle: document.getElementById("showBollToggle"),
   resetZoomBtn: document.getElementById("resetZoomBtn"),
   crosshairInfo: document.getElementById("crosshairInfo"),
@@ -43,6 +48,9 @@ const signalClassMap = {
   SELL: "sell",
   STRONG_SELL: "strong-sell",
 };
+
+const WATCHLIST_STORAGE_KEY = "smart_stock_watchlist";
+const DEFAULT_WATCHLIST = ["600519", "000001", "300750"];
 
 const chartColors = {
   close: "#38bdf8",
@@ -91,6 +99,107 @@ const crosshairPlugin = {
 };
 
 Chart.register(crosshairPlugin);
+
+function normalizeWatchCode(code) {
+  return String(code).replace(/\D/g, "");
+}
+
+function parseWatchInput(value) {
+  return [
+    ...new Set(
+      String(value)
+        .split(/[,，\s]+/)
+        .map(normalizeWatchCode)
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function loadWatchlistFromStorage() {
+  try {
+    const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
+    if (!raw) return [...DEFAULT_WATCHLIST];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_WATCHLIST];
+    const codes = [...new Set(parsed.map(normalizeWatchCode).filter(Boolean))];
+    return codes.length ? codes : [...DEFAULT_WATCHLIST];
+  } catch {
+    return [...DEFAULT_WATCHLIST];
+  }
+}
+
+function saveWatchlistToStorage(codes) {
+  localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(codes));
+}
+
+function setWatchlistCodes(codes, { persist = true } = {}) {
+  state.watchlistCodes = [...new Set(codes.map(normalizeWatchCode).filter(Boolean))];
+  elements.watchInput.value = state.watchlistCodes.join(",");
+  if (persist) {
+    saveWatchlistToStorage(state.watchlistCodes);
+  }
+  renderWatchlistChips();
+}
+
+function addToWatchlist(code) {
+  const normalized = normalizeWatchCode(code);
+  if (!normalized) return false;
+  if (state.watchlistCodes.includes(normalized)) return false;
+  setWatchlistCodes([...state.watchlistCodes, normalized]);
+  return true;
+}
+
+function removeFromWatchlist(code) {
+  const normalized = normalizeWatchCode(code);
+  setWatchlistCodes(state.watchlistCodes.filter((item) => item !== normalized));
+}
+
+function clearWatchlist() {
+  setWatchlistCodes([]);
+}
+
+function initWatchlist() {
+  setWatchlistCodes(loadWatchlistFromStorage(), { persist: false });
+}
+
+function renderWatchlistChips() {
+  if (!elements.watchlistChips) return;
+
+  if (!state.watchlistCodes.length) {
+    elements.watchlistChips.innerHTML = '<div class="empty">暂无自选股，请添加</div>';
+    elements.watchlistCount.textContent = "0 只";
+    return;
+  }
+
+  elements.watchlistCount.textContent = `${state.watchlistCodes.length} 只`;
+  elements.watchlistChips.innerHTML = state.watchlistCodes
+    .map(
+      (code) => `
+        <div class="watch-chip ${code === state.currentCode ? "active" : ""}" data-code="${code}">
+          <button type="button" class="chip-main" data-code="${code}">${code}</button>
+          <button type="button" class="chip-remove" data-code="${code}" aria-label="移除 ${code}">×</button>
+        </div>
+      `
+    )
+    .join("");
+
+  elements.watchlistChips.querySelectorAll(".chip-main").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.currentCode = button.dataset.code;
+      elements.searchInput.value = state.currentCode;
+      renderWatchlistChips();
+      loadAnalysis();
+    });
+  });
+
+  elements.watchlistChips.querySelectorAll(".chip-remove").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeFromWatchlist(button.dataset.code);
+      setStatus(`已移除自选股 ${button.dataset.code}`);
+    });
+  });
+}
 
 async function api(path) {
   const response = await fetch(path);
@@ -191,17 +300,29 @@ function renderSearchResults(items) {
             <strong>${item.name}</strong>
             <div class="meta">${item.code}</div>
           </div>
-          <span>查看</span>
+          <div class="result-actions">
+            <button type="button" class="icon-btn add-watch-btn" data-code="${item.code}" title="加入自选">+</button>
+            <span>查看</span>
+          </div>
         </div>
       `
     )
     .join("");
 
   elements.searchResults.querySelectorAll(".result-item").forEach((node) => {
-    node.addEventListener("click", () => {
+    node.addEventListener("click", (event) => {
+      if (event.target.closest(".add-watch-btn")) return;
       state.currentCode = node.dataset.code;
       elements.searchInput.value = state.currentCode;
       loadAnalysis();
+    });
+  });
+
+  elements.searchResults.querySelectorAll(".add-watch-btn").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const added = addToWatchlist(button.dataset.code);
+      setStatus(added ? `已加入自选：${button.dataset.code}` : `已在自选股中：${button.dataset.code}`);
     });
   });
 }
@@ -214,6 +335,8 @@ function renderAnalysis(payload) {
   elements.crosshairInfo.textContent = "移动鼠标到图表上查看数据，或使用 ← → 键逐根切换 K 线";
 
   elements.stockTitle.textContent = `${analysis.name} (${analysis.code})`;
+  state.currentCode = analysis.code;
+  renderWatchlistChips();
   elements.latestPrice.textContent = formatPrice(analysis.latest_price);
   elements.latestDate.textContent = `最新交易日 ${analysis.latest_date}`;
   elements.signalPill.textContent = analysis.signal.value;
@@ -762,27 +885,58 @@ async function loadAnalysis() {
 }
 
 async function loadBatch() {
-  const codes = elements.watchInput.value.trim();
-  if (!codes) {
-    setStatus("请输入自选股代码", true);
+  if (!state.watchlistCodes.length) {
+    setStatus("请先添加自选股", true);
     return;
   }
 
+  const codes = state.watchlistCodes.join(",");
   const days = elements.daysSelect.value;
   setStatus("正在批量分析...");
   try {
     const payload = await api(`/api/batch?codes=${encodeURIComponent(codes)}&days=${days}`);
     renderWatchlist(payload.items);
-    setStatus(`批量分析完成，共 ${payload.items.length} 只股票`);
+    setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到本地）`);
   } catch (error) {
     setStatus(error.message, true);
   }
+}
+
+function addWatchFromInput() {
+  const codes = parseWatchInput(elements.watchInput.value);
+  if (!codes.length) {
+    setStatus("请输入有效股票代码", true);
+    return;
+  }
+  const merged = [...new Set([...state.watchlistCodes, ...codes])];
+  const addedCount = merged.length - state.watchlistCodes.length;
+  setWatchlistCodes(merged);
+  elements.watchInput.value = "";
+  setStatus(addedCount > 0 ? `已添加 ${addedCount} 只自选股` : "这些股票已在自选股中");
+}
+
+function addCurrentToWatchlist() {
+  const code = state.currentCode || elements.searchInput.value.trim();
+  const added = addToWatchlist(code);
+  setStatus(added ? `已加入自选：${normalizeWatchCode(code)}` : `已在自选股中：${normalizeWatchCode(code)}`);
 }
 
 function bindEvents() {
   elements.searchBtn.addEventListener("click", searchStocks);
   elements.analyzeBtn.addEventListener("click", loadAnalysis);
   elements.batchBtn.addEventListener("click", loadBatch);
+  elements.addWatchBtn.addEventListener("click", addWatchFromInput);
+  document.querySelectorAll(".add-current-watch-btn").forEach((button) => {
+    button.addEventListener("click", addCurrentToWatchlist);
+  });
+  elements.clearWatchBtn.addEventListener("click", () => {
+    clearWatchlist();
+    elements.watchlist.innerHTML = '<div class="empty">点击批量分析查看结果</div>';
+    setStatus("已清空自选股");
+  });
+  elements.watchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") addWatchFromInput();
+  });
   elements.resetZoomBtn.addEventListener("click", resetZoom);
   elements.showBollToggle.addEventListener("change", (event) => {
     state.showBollinger = event.target.checked;
@@ -808,11 +962,14 @@ function bindEvents() {
 
 async function bootstrap() {
   bindEvents();
+  initWatchlist();
   await loadConfig();
   elements.searchInput.value = state.currentCode;
   await searchStocks();
   await loadAnalysis();
-  await loadBatch();
+  if (state.watchlistCodes.length) {
+    await loadBatch();
+  }
 }
 
 bootstrap();

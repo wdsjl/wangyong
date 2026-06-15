@@ -64,11 +64,23 @@
             </div>
 
             <div class="panel">
-              <h3>自选股批量分析</h3>
-              <div class="toolbar" style="grid-template-columns: 1fr auto; margin-bottom: 12px;">
-                <input id="watchInput" type="text" value="600519,000001,300750" />
-                <button class="secondary" id="batchBtn">批量分析</button>
+              <div class="watchlist-header">
+                <h3>自选股</h3>
+                <span class="meta" id="watchlistCount">0 只</span>
               </div>
+              <div class="watchlist-chips" id="watchlistChips">
+                <div class="empty">加载中...</div>
+              </div>
+              <div class="toolbar watch-toolbar">
+                <input id="watchInput" type="text" placeholder="输入代码添加，如 600519" />
+                <button class="secondary" id="addWatchBtn" type="button">添加</button>
+              </div>
+              <div class="watch-actions">
+                <button class="secondary small add-current-watch-btn" id="addCurrentWatchBtn" type="button">加入当前股</button>
+                <button id="batchBtn" type="button">批量分析</button>
+                <button class="secondary small" id="clearWatchBtn" type="button">清空</button>
+              </div>
+              <p class="watch-note">自选股会自动保存到浏览器本地</p>
               <div class="watchlist" id="watchlist">
                 <div class="empty">点击批量分析查看结果</div>
               </div>
