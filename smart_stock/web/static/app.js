@@ -6,6 +6,7 @@ const state = {
   showBollinger: false,
   hoverIndex: null,
   zoomRange: null,
+  keyboardNavEnabled: true,
   priceChart: null,
   indicatorChart: null,
 };
@@ -210,7 +211,7 @@ function renderAnalysis(payload) {
   state.chartData = payload.chart;
   state.zoomRange = defaultZoomRange(state.chartData.dates.length);
   state.hoverIndex = null;
-  elements.crosshairInfo.textContent = "移动鼠标到图表上查看十字光标数据";
+  elements.crosshairInfo.textContent = "移动鼠标到图表上查看数据，或使用 ← → 键逐根切换 K 线";
 
   elements.stockTitle.textContent = `${analysis.name} (${analysis.code})`;
   elements.latestPrice.textContent = formatPrice(analysis.latest_price);
@@ -433,7 +434,7 @@ function getIndicatorSummary(index) {
 function updateCrosshairInfo(index) {
   const chart = state.chartData;
   if (!chart || index == null) {
-    elements.crosshairInfo.textContent = "移动鼠标到图表上查看十字光标数据";
+    elements.crosshairInfo.textContent = "移动鼠标到图表上查看数据，或使用 ← → 键逐根切换 K 线";
     return;
   }
 
@@ -453,13 +454,90 @@ function updateCrosshairInfo(index) {
   elements.crosshairInfo.textContent = parts.join("  |  ");
 }
 
-function setHoverIndex(index) {
-  if (state.hoverIndex === index) return;
+function setHoverIndex(index, { force = false } = {}) {
+  if (!force && state.hoverIndex === index) return;
   state.hoverIndex = index;
   updateCrosshairInfo(index);
   syncActiveElements(index);
   state.priceChart?.update("none");
   state.indicatorChart?.update("none");
+}
+
+function getDefaultHoverIndex() {
+  if (!state.chartData) return 0;
+  if (state.zoomRange) return state.zoomRange.max;
+  return state.chartData.dates.length - 1;
+}
+
+function ensureIndexVisible(index) {
+  if (!state.zoomRange || !state.chartData) return;
+
+  const { min, max } = state.zoomRange;
+  if (index >= min && index <= max) return;
+
+  const windowSize = max - min;
+  const lastIndex = state.chartData.dates.length - 1;
+  let newMin;
+  let newMax;
+
+  if (index < min) {
+    newMin = index;
+    newMax = index + windowSize;
+  } else {
+    newMax = index;
+    newMin = index - windowSize;
+  }
+
+  if (newMin < 0) {
+    newMin = 0;
+    newMax = Math.min(windowSize, lastIndex);
+  }
+  if (newMax > lastIndex) {
+    newMax = lastIndex;
+    newMin = Math.max(0, lastIndex - windowSize);
+  }
+
+  state.zoomRange = { min: newMin, max: newMax };
+  [state.priceChart, state.indicatorChart].forEach((chart) => {
+    if (!chart) return;
+    applyZoomRange(chart.options, state.zoomRange);
+    chart.update("none");
+  });
+}
+
+function moveHoverIndex(delta) {
+  if (!state.chartData) return;
+
+  const lastIndex = state.chartData.dates.length - 1;
+  const currentIndex = state.hoverIndex == null ? getDefaultHoverIndex() : state.hoverIndex;
+  const nextIndex = Math.max(0, Math.min(lastIndex, currentIndex + delta));
+
+  ensureIndexVisible(nextIndex);
+  setHoverIndex(nextIndex, { force: true });
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
+function handleChartKeydown(event) {
+  if (!state.keyboardNavEnabled || !state.chartData || isTypingTarget(event.target)) return;
+
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    moveHoverIndex(-1);
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    moveHoverIndex(1);
+  }
+}
+
+function focusInitialHover() {
+  if (!state.chartData) return;
+  const index = getDefaultHoverIndex();
+  setHoverIndex(index, { force: true });
 }
 
 function clearHoverIndex() {
@@ -526,6 +604,7 @@ function renderCharts() {
 
   attachChartInteractions(state.priceChart);
   attachChartInteractions(state.indicatorChart);
+  focusInitialHover();
 }
 
 function buildIndicatorConfig(chart, type) {
@@ -712,6 +791,7 @@ function bindEvents() {
   elements.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchStocks();
   });
+  document.addEventListener("keydown", handleChartKeydown);
 
   document.querySelectorAll(".chart-tabs button").forEach((button) => {
     button.addEventListener("click", () => {
