@@ -361,11 +361,41 @@ button.small {
   overflow: auto;
 }
 
+.analysis-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backtest-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.insight-content {
+  color: #cbd5e1;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.insight-content h3,
+.insight-content strong {
+  color: #e2e8f0;
+}
+
 .alert-item {
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(245, 158, 11, 0.1);
   border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+#backtestChart {
+  height: 220px !important;
 }
 
 .chart-tabs {

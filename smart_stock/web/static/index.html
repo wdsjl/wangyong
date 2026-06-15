@@ -58,9 +58,34 @@
                   <div class="score-fill" id="scoreFill"></div>
                 </div>
               </div>
+              <div class="analysis-actions">
+                <button class="secondary small" id="backtestBtn" type="button">策略回测</button>
+                <button class="secondary small" id="insightBtn" type="button">AI 解读</button>
+              </div>
               <ul class="reason-list" id="reasonList"></ul>
               <div class="metric-grid" id="metricGrid"></div>
               <div class="risk-note" id="riskNote"></div>
+            </div>
+
+            <div class="panel" id="backtestPanel">
+              <div class="watchlist-header">
+                <h3>策略回测</h3>
+                <button class="secondary small" id="runBacktestBtn" type="button">运行回测</button>
+              </div>
+              <div class="backtest-stats" id="backtestStats">
+                <div class="empty">点击运行回测查看收益统计</div>
+              </div>
+              <canvas id="backtestChart"></canvas>
+            </div>
+
+            <div class="panel" id="insightPanel">
+              <div class="watchlist-header">
+                <h3>AI 投研解读</h3>
+                <button class="secondary small" id="runInsightBtn" type="button">生成解读</button>
+              </div>
+              <div class="insight-content" id="insightContent">
+                <div class="empty">结合技术面与新闻生成解读（无 API Key 时使用演示模式）</div>
+              </div>
             </div>
 
             <div class="panel">

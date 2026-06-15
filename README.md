@@ -8,7 +8,8 @@
 
 - **实时行情**：通过 [AKShare](https://github.com/akfamily/akshare) 获取 A 股日线数据
 - **技术指标**：MA、RSI、MACD、布林带
-- **智能信号**：多因子评分，输出强烈买入 / 买入 / 观望 / 卖出 / 强烈卖出
+- **策略回测**：模拟多因子信号买卖，统计收益、回撤、胜率、夏普比率
+- **AI 解读**：结合技术面与新闻生成投研摘要（支持 OpenAI 兼容 API）
 - **批量分析**：支持同时分析多只股票并排序
 - **股票搜索**：按代码或名称快速检索
 - **Web 面板**：K 线蜡烛图、缩放平移、布林带叠加、十字光标联动、自选股本地保存、监控告警、多股对比
@@ -66,6 +67,29 @@ python web_main.py --port 8000
 - MACD / RSI / 布林带 / 成交量切换
 - 信号评分卡、自选股看板（本地保存、自动监控告警）
 - 多股归一化收益对比图
+- 策略回测收益统计与 AI 投研解读
+
+### 6. 策略回测
+
+```bash
+python main.py --demo backtest 600519 --days 180 --capital 100000
+```
+
+输出策略收益、基准收益、最大回撤、胜率、夏普比率等指标。
+
+### 7. AI 解读（财报/新闻）
+
+```bash
+# 演示模式（无需 API Key）
+python main.py --demo insight 600519
+
+# 配置大模型后使用真实 AI 解读
+export OPENAI_API_KEY=your_key
+export OPENAI_BASE_URL=https://api.openai.com/v1
+python main.py insight 600519
+```
+
+可复制 `.env.example` 为 `.env` 并填入密钥。
 
 ## 评分逻辑
 
@@ -99,6 +123,9 @@ smart_stock/
 ├── serializers.py # API 序列化
 ├── service.py     # Web 服务层
 ├── strategy.py    # 交易策略与信号
+├── backtest.py    # 策略回测
+├── news.py        # 新闻资讯
+├── llm_insight.py # 大模型解读
 └── web/           # Web 面板
     ├── app.py
     └── static/
@@ -116,8 +143,8 @@ web_main.py        # Web 入口
 
 ## 后续可扩展方向
 
-- 接入大模型解读财报与新闻情绪
-- 策略回测与收益统计
+- 策略参数优化与多策略组合回测
+- 接入更多实时资讯源与公告 PDF 解析
 
 ## License
 

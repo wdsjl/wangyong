@@ -8,7 +8,15 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from smart_stock.service import batch_analyze, compare_stocks, detail_to_dict, get_stock_detail, search_stocks
+from smart_stock.service import (
+    backtest_stock,
+    batch_analyze,
+    compare_stocks,
+    detail_to_dict,
+    get_stock_detail,
+    search_stocks,
+    stock_insight,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -81,6 +89,35 @@ def create_app(demo: bool = False) -> FastAPI:
         if len(series) < 2:
             raise HTTPException(status_code=400, detail="有效股票不足，无法生成对比图")
         return {"series": series, "demo": use_demo}
+
+    @app.get("/api/backtest/{code}")
+    async def api_backtest(
+        code: str,
+        days: int = Query(180, ge=90, le=365),
+        capital: float = Query(100000, ge=10000, le=10_000_000),
+        demo: bool | None = None,
+    ) -> dict:
+        use_demo = app.state.demo if demo is None else demo
+        try:
+            payload = backtest_stock(code, days=days, demo=use_demo, initial_capital=capital)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        payload["demo"] = use_demo
+        return payload
+
+    @app.get("/api/insight/{code}")
+    async def api_insight(
+        code: str,
+        days: int = Query(120, ge=30, le=365),
+        demo: bool | None = None,
+    ) -> dict:
+        use_demo = app.state.demo if demo is None else demo
+        try:
+            payload = stock_insight(code, days=days, demo=use_demo)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        payload["demo"] = use_demo
+        return payload
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

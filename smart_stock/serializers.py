@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from smart_stock.backtest import BacktestResult
 from smart_stock.models import AnalysisResult, IndicatorSnapshot, Signal
 
 
@@ -72,6 +73,27 @@ def dataframe_to_chart(df: pd.DataFrame) -> dict[str, list[Any]]:
                 payload[column].append(round(float(value), 4) if column != "volume" else int(value))
 
     return payload
+
+
+def backtest_to_dict(result: BacktestResult) -> dict[str, Any]:
+    return {
+        "code": result.code,
+        "name": result.name,
+        "start_date": result.start_date,
+        "end_date": result.end_date,
+        "initial_capital": result.initial_capital,
+        "final_equity": result.final_equity,
+        "total_return_pct": result.total_return_pct,
+        "benchmark_return_pct": result.benchmark_return_pct,
+        "excess_return_pct": result.excess_return_pct,
+        "max_drawdown_pct": result.max_drawdown_pct,
+        "win_rate_pct": result.win_rate_pct,
+        "trade_count": result.trade_count,
+        "sharpe_ratio": result.sharpe_ratio,
+        "equity_curve": result.equity_curve,
+        "trades": [asdict(trade) for trade in result.trades],
+        "risk_note": result.risk_note,
+    }
 
 
 def to_jsonable(value: Any) -> Any:

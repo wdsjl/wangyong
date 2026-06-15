@@ -15,6 +15,7 @@ const state = {
   priceChart: null,
   indicatorChart: null,
   compareChart: null,
+  backtestChart: null,
 };
 
 const elements = {
@@ -47,6 +48,14 @@ const elements = {
   notifyToggle: document.getElementById("notifyToggle"),
   alertPanel: document.getElementById("alertPanel"),
   compareBtn: document.getElementById("compareBtn"),
+  backtestBtn: document.getElementById("backtestBtn"),
+  insightBtn: document.getElementById("insightBtn"),
+  runBacktestBtn: document.getElementById("runBacktestBtn"),
+  runInsightBtn: document.getElementById("runInsightBtn"),
+  backtestStats: document.getElementById("backtestStats"),
+  backtestPanel: document.getElementById("backtestPanel"),
+  insightContent: document.getElementById("insightContent"),
+  insightPanel: document.getElementById("insightPanel"),
   showBollToggle: document.getElementById("showBollToggle"),
   resetZoomBtn: document.getElementById("resetZoomBtn"),
   crosshairInfo: document.getElementById("crosshairInfo"),
@@ -1043,6 +1052,120 @@ function rerenderPriceChart() {
   }
 }
 
+async function loadBacktest() {
+  const code = state.currentCode || elements.searchInput.value.trim();
+  if (!code) {
+    setStatus("请先选择股票", true);
+    return;
+  }
+
+  const days = elements.daysSelect.value;
+  setStatus(`正在回测 ${code}...`);
+  try {
+    const payload = await api(`/api/backtest/${encodeURIComponent(code)}?days=${days}&capital=100000`);
+    renderBacktest(payload);
+    elements.backtestPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setStatus(`回测完成：策略收益 ${payload.total_return_pct >= 0 ? "+" : ""}${payload.total_return_pct}%`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function renderBacktest(payload) {
+  const stats = [
+    ["策略收益", `${payload.total_return_pct >= 0 ? "+" : ""}${payload.total_return_pct}%`],
+    ["基准收益", `${payload.benchmark_return_pct >= 0 ? "+" : ""}${payload.benchmark_return_pct}%`],
+    ["超额收益", `${payload.excess_return_pct >= 0 ? "+" : ""}${payload.excess_return_pct}%`],
+    ["最大回撤", `${payload.max_drawdown_pct}%`],
+    ["胜率", `${payload.win_rate_pct}%`],
+    ["交易次数", String(payload.trade_count)],
+    ["夏普比率", payload.sharpe_ratio == null ? "-" : Number(payload.sharpe_ratio).toFixed(2)],
+    ["期末权益", formatPrice(payload.final_equity)],
+  ];
+
+  elements.backtestStats.innerHTML = stats
+    .map(
+      ([label, value]) => `
+        <div class="metric">
+          <span>${label}</span>
+          <strong>${value}</strong>
+        </div>
+      `
+    )
+    .join("");
+
+  destroyChart(state.backtestChart);
+  const ctx = document.getElementById("backtestChart");
+  const dates = payload.equity_curve.map((item) => item.date);
+  state.backtestChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: "策略权益",
+          data: payload.equity_curve.map((item) => item.equity),
+          borderColor: "#38bdf8",
+          backgroundColor: "#38bdf8",
+          pointRadius: 0,
+          tension: 0.2,
+        },
+        {
+          label: "买入持有",
+          data: payload.equity_curve.map((item) => item.benchmark),
+          borderColor: "#94a3b8",
+          backgroundColor: "#94a3b8",
+          pointRadius: 0,
+          borderDash: [6, 4],
+          tension: 0.2,
+        },
+      ],
+    },
+    options: baseChartOptions(),
+  });
+}
+
+function markdownToHtml(text) {
+  return text
+    .replace(/^## (.*$)/gim, "<h3>$1</h3>")
+    .replace(/^\- (.*$)/gim, "<li>$1</li>")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n{2,}/g, "<br><br>");
+}
+
+async function loadInsight() {
+  const code = state.currentCode || elements.searchInput.value.trim();
+  if (!code) {
+    setStatus("请先选择股票", true);
+    return;
+  }
+
+  const days = elements.daysSelect.value;
+  setStatus(`正在生成 AI 解读：${code}...`);
+  elements.insightContent.innerHTML = '<div class="empty">正在分析技术面与新闻...</div>';
+  try {
+    const payload = await api(`/api/insight/${encodeURIComponent(code)}?days=${days}`);
+    renderInsight(payload);
+    elements.insightPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const modeLabel = payload.mode === "llm" ? "大模型" : "演示模式";
+    setStatus(`AI 解读完成（${modeLabel}）`);
+  } catch (error) {
+    elements.insightContent.innerHTML = `<div class="empty">${error.message}</div>`;
+    setStatus(error.message, true);
+  }
+}
+
+function renderInsight(payload) {
+  const newsHtml = (payload.news || [])
+    .map((item) => `<li>[${item.published_at}] ${item.title}（${item.source}）</li>`)
+    .join("");
+  elements.insightContent.innerHTML = `
+    <div>${markdownToHtml(payload.content)}</div>
+    ${newsHtml ? `<h3>参考新闻</h3><ul>${newsHtml}</ul>` : ""}
+    <p class="watch-note">${payload.disclaimer}</p>
+  `;
+}
+
 async function loadConfig() {
   const config = await api("/api/config");
   state.demo = config.demo;
@@ -1156,6 +1279,10 @@ function bindEvents() {
     refreshWatchlist({ detectChanges: true, withCompare: true });
   });
   elements.compareBtn.addEventListener("click", loadCompareChart);
+  elements.backtestBtn.addEventListener("click", loadBacktest);
+  elements.insightBtn.addEventListener("click", loadInsight);
+  elements.runBacktestBtn.addEventListener("click", loadBacktest);
+  elements.runInsightBtn.addEventListener("click", loadInsight);
   elements.monitorToggle.addEventListener("change", (event) => {
     state.monitorEnabled = event.target.checked;
     saveMonitorSettings();

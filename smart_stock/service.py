@@ -14,7 +14,9 @@ from smart_stock.config import (
 from smart_stock.data import fetch_daily_bars, get_stock_name, normalize_code, search_stock
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import AnalysisResult
-from smart_stock.serializers import analysis_to_dict, dataframe_to_chart
+from smart_stock.backtest import BacktestConfig, run_backtest
+from smart_stock.llm_insight import generate_insight
+from smart_stock.serializers import analysis_to_dict, backtest_to_dict, dataframe_to_chart
 from smart_stock.strategy import generate_signal
 
 
@@ -99,6 +101,25 @@ def compare_stocks(codes: list[str], days: int = 120, demo: bool = False) -> lis
             continue
 
     return sorted(series_list, key=lambda item: item["return_pct"], reverse=True)
+
+
+def backtest_stock(
+    code: str,
+    days: int = 180,
+    demo: bool = False,
+    initial_capital: float = 100_000.0,
+) -> dict:
+    result = run_backtest(
+        code,
+        days=days,
+        demo=demo,
+        backtest_config=BacktestConfig(initial_capital=initial_capital),
+    )
+    return backtest_to_dict(result)
+
+
+def stock_insight(code: str, days: int = 120, demo: bool = False, news_limit: int = 5) -> dict:
+    return generate_insight(code, days=days, demo=demo, news_limit=news_limit)
 
 
 def detail_to_dict(detail: StockDetail) -> dict:
