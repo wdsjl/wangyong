@@ -80,6 +80,25 @@
                 <button id="batchBtn" type="button">批量分析</button>
                 <button class="secondary small" id="clearWatchBtn" type="button">清空</button>
               </div>
+              <div class="monitor-controls">
+                <label class="toggle">
+                  <input id="monitorToggle" type="checkbox" checked />
+                  <span>自动监控</span>
+                </label>
+                <select id="monitorInterval">
+                  <option value="30">30 秒</option>
+                  <option value="60" selected>60 秒</option>
+                  <option value="300">5 分钟</option>
+                </select>
+                <button class="secondary small" id="monitorNowBtn" type="button">立即刷新</button>
+              </div>
+              <label class="toggle notify-toggle">
+                <input id="notifyToggle" type="checkbox" />
+                <span>信号变化浏览器通知</span>
+              </label>
+              <div class="alert-panel" id="alertPanel">
+                <div class="empty">暂无信号变化告警</div>
+              </div>
               <p class="watch-note">自选股会自动保存到浏览器本地</p>
               <div class="watchlist" id="watchlist">
                 <div class="empty">点击批量分析查看结果</div>
@@ -114,6 +133,17 @@
                 <button class="secondary" data-chart="volume">成交量</button>
               </div>
               <canvas id="indicatorChart"></canvas>
+            </div>
+
+            <div class="panel chart-card">
+              <div class="chart-toolbar">
+                <div>
+                  <h3>多股收益对比</h3>
+                  <p class="chart-hint">归一化走势（起点 = 100），对比自选股区间强弱</p>
+                </div>
+                <button class="secondary small" id="compareBtn" type="button">刷新对比</button>
+              </div>
+              <canvas id="compareChart"></canvas>
             </div>
           </main>
         </div>

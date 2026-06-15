@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from smart_stock.service import batch_analyze, detail_to_dict, get_stock_detail, search_stocks
+from smart_stock.service import batch_analyze, compare_stocks, detail_to_dict, get_stock_detail, search_stocks
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -66,6 +66,21 @@ def create_app(demo: bool = False) -> FastAPI:
             raise HTTPException(status_code=400, detail="请至少提供一个股票代码")
         items = batch_analyze(code_list, days=days, demo=use_demo)
         return {"items": items, "demo": use_demo}
+
+    @app.get("/api/compare")
+    async def api_compare(
+        codes: str = Query(..., description="逗号分隔的股票代码"),
+        days: int = Query(120, ge=30, le=365),
+        demo: bool | None = None,
+    ) -> dict:
+        use_demo = app.state.demo if demo is None else demo
+        code_list = [item.strip() for item in codes.split(",") if item.strip()]
+        if len(code_list) < 2:
+            raise HTTPException(status_code=400, detail="请至少提供两只股票进行对比")
+        series = compare_stocks(code_list, days=days, demo=use_demo)
+        if len(series) < 2:
+            raise HTTPException(status_code=400, detail="有效股票不足，无法生成对比图")
+        return {"series": series, "demo": use_demo}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

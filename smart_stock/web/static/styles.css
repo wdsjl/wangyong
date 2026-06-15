@@ -330,6 +330,44 @@ button.small {
   height: 320px !important;
 }
 
+#compareChart {
+  height: 280px !important;
+}
+
+.monitor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.monitor-controls select {
+  width: auto;
+  min-width: 110px;
+  padding: 8px 10px;
+}
+
+.notify-toggle {
+  margin-bottom: 10px;
+}
+
+.alert-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.alert-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
 .chart-tabs {
   display: flex;
   gap: 8px;

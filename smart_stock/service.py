@@ -68,6 +68,39 @@ def batch_analyze(codes: list[str], days: int | None = None, demo: bool = False)
     return sorted(payload, key=lambda item: item["score"], reverse=True)
 
 
+def compare_stocks(codes: list[str], days: int = 120, demo: bool = False) -> list[dict]:
+    """对比多只股票区间涨跌幅（归一化起点为 100）。"""
+    series_list: list[dict] = []
+    lookback_days = max(days, 30)
+
+    for code in codes:
+        normalized_code = normalize_code(code)
+        if not normalized_code:
+            continue
+        try:
+            bars = fetch_daily_bars(normalized_code, days=lookback_days, demo=demo)
+            if bars.empty:
+                continue
+            base_price = float(bars.iloc[0]["close"])
+            if base_price <= 0:
+                continue
+            normalized = (bars["close"] / base_price * 100).round(4)
+            latest_price = float(bars.iloc[-1]["close"])
+            series_list.append(
+                {
+                    "code": normalized_code,
+                    "name": get_stock_name(normalized_code, demo=demo),
+                    "dates": [item.strftime("%Y-%m-%d") for item in bars["date"]],
+                    "values": normalized.tolist(),
+                    "return_pct": round((latest_price / base_price - 1) * 100, 2),
+                }
+            )
+        except Exception:
+            continue
+
+    return sorted(series_list, key=lambda item: item["return_pct"], reverse=True)
+
+
 def detail_to_dict(detail: StockDetail) -> dict:
     return {
         "analysis": analysis_to_dict(detail.analysis),

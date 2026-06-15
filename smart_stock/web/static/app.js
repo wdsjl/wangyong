@@ -8,8 +8,13 @@ const state = {
   zoomRange: null,
   keyboardNavEnabled: true,
   watchlistCodes: [],
+  monitorEnabled: true,
+  monitorIntervalSec: 60,
+  notifyEnabled: false,
+  monitorTimer: null,
   priceChart: null,
   indicatorChart: null,
+  compareChart: null,
 };
 
 const elements = {
@@ -36,6 +41,12 @@ const elements = {
   watchlist: document.getElementById("watchlist"),
   watchlistChips: document.getElementById("watchlistChips"),
   watchlistCount: document.getElementById("watchlistCount"),
+  monitorToggle: document.getElementById("monitorToggle"),
+  monitorInterval: document.getElementById("monitorInterval"),
+  monitorNowBtn: document.getElementById("monitorNowBtn"),
+  notifyToggle: document.getElementById("notifyToggle"),
+  alertPanel: document.getElementById("alertPanel"),
+  compareBtn: document.getElementById("compareBtn"),
   showBollToggle: document.getElementById("showBollToggle"),
   resetZoomBtn: document.getElementById("resetZoomBtn"),
   crosshairInfo: document.getElementById("crosshairInfo"),
@@ -50,7 +61,11 @@ const signalClassMap = {
 };
 
 const WATCHLIST_STORAGE_KEY = "smart_stock_watchlist";
+const SIGNAL_SNAPSHOT_KEY = "smart_stock_signal_snapshot";
+const MONITOR_SETTINGS_KEY = "smart_stock_monitor_settings";
 const DEFAULT_WATCHLIST = ["600519", "000001", "300750"];
+
+const COMPARE_COLORS = ["#38bdf8", "#f472b6", "#fbbf24", "#34d399", "#c084fc", "#fb7185", "#22d3ee", "#f97316"];
 
 const chartColors = {
   close: "#38bdf8",
@@ -199,6 +214,188 @@ function renderWatchlistChips() {
       setStatus(`已移除自选股 ${button.dataset.code}`);
     });
   });
+}
+
+function loadMonitorSettings() {
+  try {
+    const raw = localStorage.getItem(MONITOR_SETTINGS_KEY);
+    if (!raw) return;
+    const settings = JSON.parse(raw);
+    state.monitorEnabled = settings.monitorEnabled ?? true;
+    state.monitorIntervalSec = settings.monitorIntervalSec ?? 60;
+    state.notifyEnabled = settings.notifyEnabled ?? false;
+  } catch {
+    // 使用默认值
+  }
+}
+
+function saveMonitorSettings() {
+  localStorage.setItem(
+    MONITOR_SETTINGS_KEY,
+    JSON.stringify({
+      monitorEnabled: state.monitorEnabled,
+      monitorIntervalSec: state.monitorIntervalSec,
+      notifyEnabled: state.notifyEnabled,
+    })
+  );
+}
+
+function loadSignalSnapshot() {
+  try {
+    return JSON.parse(localStorage.getItem(SIGNAL_SNAPSHOT_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveSignalSnapshot(items) {
+  const snapshot = {};
+  items.forEach((item) => {
+    snapshot[item.code] = {
+      signal: item.signal.value,
+      signalKey: item.signal.key,
+      score: item.score,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  localStorage.setItem(SIGNAL_SNAPSHOT_KEY, JSON.stringify(snapshot));
+}
+
+function detectSignalChanges(items, previous) {
+  return items
+    .filter((item) => {
+      const prev = previous[item.code];
+      return prev && prev.signal !== item.signal.value;
+    })
+    .map((item) => ({
+      code: item.code,
+      name: item.name,
+      from: previous[item.code].signal,
+      to: item.signal.value,
+      score: item.score,
+    }));
+}
+
+function renderAlerts(alerts) {
+  if (!alerts.length) {
+    elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化告警</div>';
+    return;
+  }
+
+  elements.alertPanel.innerHTML = alerts
+    .map(
+      (alert) => `
+        <div class="alert-item">
+          <strong>${alert.name} (${alert.code})</strong>
+          <div class="meta">信号 ${alert.from} → ${alert.to} · 评分 ${alert.score >= 0 ? "+" : ""}${Number(alert.score).toFixed(3)}</div>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function notifySignalChanges(alerts) {
+  if (!state.notifyEnabled || !alerts.length || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+
+  const body = alerts.map((alert) => `${alert.name}: ${alert.from} → ${alert.to}`).join("\n");
+  new Notification("自选股信号变化", { body });
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    setStatus("当前浏览器不支持通知", true);
+    state.notifyEnabled = false;
+    elements.notifyToggle.checked = false;
+    return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    state.notifyEnabled = false;
+    elements.notifyToggle.checked = false;
+    setStatus("未授予通知权限", true);
+  }
+}
+
+function stopMonitorTimer() {
+  if (state.monitorTimer) {
+    clearInterval(state.monitorTimer);
+    state.monitorTimer = null;
+  }
+}
+
+function startMonitorTimer() {
+  stopMonitorTimer();
+  if (!state.monitorEnabled) return;
+  state.monitorTimer = setInterval(() => {
+    refreshWatchlist({ detectChanges: true, silent: true });
+  }, state.monitorIntervalSec * 1000);
+}
+
+function initMonitorControls() {
+  loadMonitorSettings();
+  elements.monitorToggle.checked = state.monitorEnabled;
+  elements.monitorInterval.value = String(state.monitorIntervalSec);
+  elements.notifyToggle.checked = state.notifyEnabled;
+  startMonitorTimer();
+}
+
+function renderCompareChart(series) {
+  destroyChart(state.compareChart);
+  if (!series.length) {
+    return;
+  }
+
+  const ctx = document.getElementById("compareChart");
+  state.compareChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      datasets: series.map((item, index) => ({
+        label: `${item.name} (${item.return_pct >= 0 ? "+" : ""}${item.return_pct}%)`,
+        data: item.dates.map((date, dateIndex) => ({
+          x: date,
+          y: item.values[dateIndex],
+        })),
+        borderColor: COMPARE_COLORS[index % COMPARE_COLORS.length],
+        backgroundColor: COMPARE_COLORS[index % COMPARE_COLORS.length],
+        pointRadius: 0,
+        borderWidth: 2,
+        tension: 0.2,
+      })),
+    },
+    options: baseChartOptions({
+      plugins: {
+        zoom: {
+          pan: { enabled: true, mode: "x" },
+          zoom: {
+            wheel: { enabled: true, speed: 0.08 },
+            pinch: { enabled: true },
+            mode: "x",
+          },
+        },
+      },
+    }),
+  });
+}
+
+async function loadCompareChart() {
+  if (state.watchlistCodes.length < 2) {
+    destroyChart(state.compareChart);
+    setStatus("至少需要 2 只自选股才能对比", true);
+    return;
+  }
+
+  const days = elements.daysSelect.value;
+  setStatus("正在生成多股对比图...");
+  try {
+    const payload = await api(
+      `/api/compare?codes=${encodeURIComponent(state.watchlistCodes.join(","))}&days=${days}`
+    );
+    renderCompareChart(payload.series);
+    setStatus(`多股对比已更新，共 ${payload.series.length} 只股票`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
 }
 
 async function api(path) {
@@ -884,22 +1081,41 @@ async function loadAnalysis() {
   }
 }
 
-async function loadBatch() {
+async function refreshWatchlist({ detectChanges = false, silent = false, withCompare = false } = {}) {
   if (!state.watchlistCodes.length) {
-    setStatus("请先添加自选股", true);
+    if (!silent) setStatus("请先添加自选股", true);
     return;
   }
 
   const codes = state.watchlistCodes.join(",");
   const days = elements.daysSelect.value;
-  setStatus("正在批量分析...");
+  if (!silent) setStatus(detectChanges ? "正在监控刷新..." : "正在批量分析...");
+
   try {
     const payload = await api(`/api/batch?codes=${encodeURIComponent(codes)}&days=${days}`);
+    const previous = loadSignalSnapshot();
+    const alerts = detectChanges ? detectSignalChanges(payload.items, previous) : [];
+    saveSignalSnapshot(payload.items);
     renderWatchlist(payload.items);
-    setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到本地）`);
+    if (detectChanges) {
+      renderAlerts(alerts);
+      notifySignalChanges(alerts);
+      if (!silent) {
+        setStatus(alerts.length ? `检测到 ${alerts.length} 条信号变化` : "监控刷新完成，信号无变化");
+      }
+    } else if (!silent) {
+      setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到本地）`);
+    }
+    if (withCompare || state.watchlistCodes.length >= 2) {
+      await loadCompareChart();
+    }
   } catch (error) {
-    setStatus(error.message, true);
+    if (!silent) setStatus(error.message, true);
   }
+}
+
+async function loadBatch() {
+  await refreshWatchlist({ detectChanges: false, withCompare: true });
 }
 
 function addWatchFromInput() {
@@ -932,7 +1148,32 @@ function bindEvents() {
   elements.clearWatchBtn.addEventListener("click", () => {
     clearWatchlist();
     elements.watchlist.innerHTML = '<div class="empty">点击批量分析查看结果</div>';
+    elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化告警</div>';
+    destroyChart(state.compareChart);
     setStatus("已清空自选股");
+  });
+  elements.monitorNowBtn.addEventListener("click", () => {
+    refreshWatchlist({ detectChanges: true, withCompare: true });
+  });
+  elements.compareBtn.addEventListener("click", loadCompareChart);
+  elements.monitorToggle.addEventListener("change", (event) => {
+    state.monitorEnabled = event.target.checked;
+    saveMonitorSettings();
+    startMonitorTimer();
+    setStatus(state.monitorEnabled ? "已开启自动监控" : "已关闭自动监控");
+  });
+  elements.monitorInterval.addEventListener("change", (event) => {
+    state.monitorIntervalSec = Number(event.target.value);
+    saveMonitorSettings();
+    startMonitorTimer();
+  });
+  elements.notifyToggle.addEventListener("change", async (event) => {
+    state.notifyEnabled = event.target.checked;
+    saveMonitorSettings();
+    if (state.notifyEnabled) {
+      await requestNotificationPermission();
+      saveMonitorSettings();
+    }
   });
   elements.watchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") addWatchFromInput();
@@ -963,6 +1204,7 @@ function bindEvents() {
 async function bootstrap() {
   bindEvents();
   initWatchlist();
+  initMonitorControls();
   await loadConfig();
   elements.searchInput.value = state.currentCode;
   await searchStocks();

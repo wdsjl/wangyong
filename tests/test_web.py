@@ -47,3 +47,12 @@ def test_api_batch_demo():
     assert response.status_code == 200
     payload = response.json()
     assert len(payload["items"]) == 2
+
+
+def test_api_compare_demo():
+    client = TestClient(create_app(demo=True))
+    response = client.get("/api/compare", params={"codes": "600519,000001,300750", "days": 60})
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["series"]) == 3
+    assert payload["series"][0]["values"][0] == 100
