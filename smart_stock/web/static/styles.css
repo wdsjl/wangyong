@@ -341,6 +341,33 @@ button.small {
   width: 100% !important;
 }
 
+.chart-card {
+  position: relative;
+}
+
+.chart-empty {
+  display: none;
+  position: absolute;
+  inset: 72px 18px 18px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  padding: 18px;
+  z-index: 2;
+}
+
+.chart-empty.visible {
+  display: flex;
+}
+
+.chart-card canvas.is-hidden {
+  opacity: 0;
+}
+
 #priceChart {
   height: 360px !important;
 }

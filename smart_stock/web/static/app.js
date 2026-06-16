@@ -59,6 +59,8 @@ const elements = {
   showBollToggle: document.getElementById("showBollToggle"),
   resetZoomBtn: document.getElementById("resetZoomBtn"),
   crosshairInfo: document.getElementById("crosshairInfo"),
+  priceChartEmpty: document.getElementById("priceChartEmpty"),
+  indicatorChartEmpty: document.getElementById("indicatorChartEmpty"),
 };
 
 const signalClassMap = {
@@ -123,6 +125,50 @@ const crosshairPlugin = {
 };
 
 Chart.register(crosshairPlugin);
+
+function initChartEnvironment() {
+  if (typeof Chart === "undefined") {
+    throw new Error("Chart.js 未加载，请确认 /static/vendor 目录下的图表库文件存在");
+  }
+  if (typeof ChartZoom !== "undefined") {
+    Chart.register(ChartZoom);
+  }
+  if (!Chart.registry.getController("candlestick")) {
+    throw new Error("K 线插件未加载，请更新代码并重启 Web 服务");
+  }
+}
+
+try {
+  initChartEnvironment();
+} catch (error) {
+  console.error(error);
+  document.addEventListener("DOMContentLoaded", () => {
+    showChartMessage("priceChartEmpty", `${error.message}。请 git pull 更新后重启 web_main.py`);
+    showChartMessage("indicatorChartEmpty", "图表库未就绪");
+    setCanvasVisible("priceChart", false);
+    setCanvasVisible("indicatorChart", false);
+  });
+}
+
+function showChartMessage(targetId, message) {
+  const node = document.getElementById(targetId);
+  if (!node) return;
+  node.textContent = message;
+  node.classList.add("visible");
+}
+
+function hideChartMessage(targetId) {
+  const node = document.getElementById(targetId);
+  if (!node) return;
+  node.classList.remove("visible");
+  node.textContent = "";
+}
+
+function setCanvasVisible(canvasId, visible) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  canvas.classList.toggle("is-hidden", !visible);
+}
 
 function normalizeWatchCode(code) {
   return String(code).replace(/\D/g, "");
@@ -920,27 +966,92 @@ function attachChartInteractions(chart) {
 
 function renderCharts() {
   const chart = state.chartData;
-  if (!chart) return;
+  if (!chart || !chart.dates?.length) {
+    showChartMessage("priceChartEmpty", "暂无 K 线数据，请先点击「分析」加载股票");
+    showChartMessage("indicatorChartEmpty", "暂无副图数据");
+    setCanvasVisible("priceChart", false);
+    setCanvasVisible("indicatorChart", false);
+    return;
+  }
+
+  hideChartMessage("priceChartEmpty");
+  hideChartMessage("indicatorChartEmpty");
+  setCanvasVisible("priceChart", true);
+  setCanvasVisible("indicatorChart", true);
 
   destroyChart(state.priceChart);
   destroyChart(state.indicatorChart);
 
+  try {
+    const priceCtx = document.getElementById("priceChart");
+    state.priceChart = new Chart(priceCtx, {
+      type: "candlestick",
+      data: {
+        labels: chart.dates,
+        datasets: buildPriceDatasets(chart),
+      },
+      options: baseChartOptions({
+        scales: {
+          x: {
+            type: "category",
+          },
+        },
+      }),
+    });
+
+    const indicatorCtx = document.getElementById("indicatorChart");
+    state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
+
+    attachChartInteractions(state.priceChart);
+    attachChartInteractions(state.indicatorChart);
+    focusInitialHover();
+  } catch (error) {
+    console.error(error);
+    destroyChart(state.priceChart);
+    destroyChart(state.indicatorChart);
+    state.priceChart = null;
+    state.indicatorChart = null;
+    try {
+      renderPriceChartFallback(chart);
+      const indicatorCtx = document.getElementById("indicatorChart");
+      state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
+      attachChartInteractions(state.indicatorChart);
+      showChartMessage(
+        "priceChartEmpty",
+        `蜡烛图加载失败，已回退为收盘价折线图。请 Ctrl+F5 强刷页面后重试。(${error.message})`
+      );
+    } catch (fallbackError) {
+      showChartMessage("priceChartEmpty", `K 线加载失败：${error.message}`);
+      showChartMessage("indicatorChartEmpty", `副图加载失败：${fallbackError.message}`);
+      setCanvasVisible("priceChart", false);
+      setCanvasVisible("indicatorChart", false);
+      throw error;
+    }
+  }
+}
+
+function renderPriceChartFallback(chart) {
   const priceCtx = document.getElementById("priceChart");
   state.priceChart = new Chart(priceCtx, {
-    type: "candlestick",
+    type: "line",
     data: {
       labels: chart.dates,
-      datasets: buildPriceDatasets(chart),
+      datasets: [
+        buildLineDataset("收盘价", chart.close, chartColors.close),
+        buildLineDataset("MA5", chart.ma5, chartColors.ma5),
+        buildLineDataset("MA20", chart.ma20, chartColors.ma20),
+      ],
     },
-    options: baseChartOptions(),
+    options: baseChartOptions({
+      scales: {
+        x: {
+          type: "category",
+        },
+      },
+    }),
   });
-
-  const indicatorCtx = document.getElementById("indicatorChart");
-  state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
-
   attachChartInteractions(state.priceChart);
-  attachChartInteractions(state.indicatorChart);
-  focusInitialHover();
+  setCanvasVisible("priceChart", true);
 }
 
 function buildIndicatorConfig(chart, type) {
@@ -1043,18 +1154,35 @@ function rerenderIndicatorChart() {
 function rerenderPriceChart() {
   if (!state.chartData) return;
   destroyChart(state.priceChart);
-  const priceCtx = document.getElementById("priceChart");
-  state.priceChart = new Chart(priceCtx, {
-    type: "candlestick",
-    data: {
-      labels: state.chartData.dates,
-      datasets: buildPriceDatasets(state.chartData),
-    },
-    options: baseChartOptions(),
-  });
-  attachChartInteractions(state.priceChart);
+  try {
+    const priceCtx = document.getElementById("priceChart");
+    state.priceChart = new Chart(priceCtx, {
+      type: "candlestick",
+      data: {
+        labels: state.chartData.dates,
+        datasets: buildPriceDatasets(state.chartData),
+      },
+      options: baseChartOptions({
+        scales: {
+          x: {
+            type: "category",
+          },
+        },
+      }),
+    });
+    attachChartInteractions(state.priceChart);
+    hideChartMessage("priceChartEmpty");
+    setCanvasVisible("priceChart", true);
+  } catch (error) {
+    renderPriceChartFallback(state.chartData);
+    showChartMessage("priceChartEmpty", `蜡烛图加载失败，已回退为折线图。(${error.message})`);
+  }
   if (state.hoverIndex != null) {
     syncActiveElements(state.hoverIndex);
+    state.priceChart?.update("none");
+  }
+  if (state.zoomRange && state.priceChart) {
+    applyZoomRange(state.priceChart.options, state.zoomRange);
     state.priceChart.update("none");
   }
 }
@@ -1211,6 +1339,7 @@ async function loadAnalysis() {
   state.currentCode = code;
 
   setStatus(`正在分析 ${code}...`);
+  showChartMessage("priceChartEmpty", `正在加载 ${code} 的 K 线...`);
   try {
     const payload = await api(`/api/analyze/${encodeURIComponent(code)}?days=${days}`);
     renderAnalysis(payload);
@@ -1221,6 +1350,10 @@ async function loadAnalysis() {
         : "（演示数据）";
     setStatus(`分析完成：${payload.analysis.name}${sourceHint}`);
   } catch (error) {
+    showChartMessage("priceChartEmpty", `分析失败，无法加载 K 线：${error.message}`);
+    showChartMessage("indicatorChartEmpty", "副图暂无数据");
+    setCanvasVisible("priceChart", false);
+    setCanvasVisible("indicatorChart", false);
     setStatus(error.message, true);
   }
 }

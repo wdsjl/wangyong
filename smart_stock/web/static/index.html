@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能炒股 · Web 面板</title>
     <link rel="stylesheet" href="/static/styles.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="/static/vendor/chart.umd.min.js"></script>
+    <script src="/static/vendor/hammer.min.js"></script>
+    <script src="/static/vendor/chartjs-chart-financial.min.js"></script>
+    <script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
   </head>
   <body>
     <div class="container">
@@ -147,6 +147,7 @@
                 </div>
               </div>
               <div class="crosshair-info" id="crosshairInfo">移动鼠标到图表上查看数据，或使用 ← → 键逐根切换 K 线</div>
+              <div class="chart-empty" id="priceChartEmpty">正在加载 K 线...</div>
               <canvas id="priceChart"></canvas>
             </div>
 
@@ -157,6 +158,7 @@
                 <button class="secondary" data-chart="boll">布林带</button>
                 <button class="secondary" data-chart="volume">成交量</button>
               </div>
+              <div class="chart-empty" id="indicatorChartEmpty"></div>
               <canvas id="indicatorChart"></canvas>
             </div>
 
