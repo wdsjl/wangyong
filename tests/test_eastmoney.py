@@ -42,6 +42,52 @@ def test_to_secid():
     assert eastmoney.to_secid("600519") == "1.600519"
 
 
+SPOT_PAYLOAD = {
+    "data": {
+        "f43": 16.07,
+        "f44": 16.48,
+        "f45": 15.52,
+        "f46": 16.35,
+        "f57": "000815",
+        "f58": "美利云",
+        "f60": 16.22,
+        "f170": -0.92,
+    }
+}
+
+
+@patch("smart_stock.eastmoney.direct_http_get_json")
+def test_fetch_spot_quote(mock_get_json):
+    mock_get_json.return_value = SPOT_PAYLOAD
+    spot = eastmoney.fetch_spot_quote("000815")
+    assert spot is not None
+    assert spot.price == 16.07
+    assert spot.name == "美利云"
+
+
+@patch("smart_stock.data.eastmoney.fetch_spot_quote")
+def test_attach_live_spot_price(mock_spot):
+    from smart_stock.data import attach_live_spot_price
+    from smart_stock.models import AnalysisResult, Signal
+
+    mock_spot.return_value = eastmoney.SpotQuote(
+        code="000815",
+        name="美利云",
+        price=16.07,
+    )
+    result = AnalysisResult(
+        code="000815",
+        name="美利云",
+        latest_price=10.19,
+        latest_date="2026-06-16",
+        signal=Signal.HOLD,
+        score=0.0,
+    )
+    updated = attach_live_spot_price(result, "000815", "live")
+    assert updated.latest_price == 16.07
+    assert updated.price_label == "实时价"
+
+
 @patch("smart_stock.eastmoney.direct_http_get_json")
 def test_fetch_daily_bars_retries_shorter_window(mock_get_json):
     mock_get_json.side_effect = [

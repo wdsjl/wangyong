@@ -29,6 +29,7 @@ def analysis_to_dict(result: AnalysisResult) -> dict[str, Any]:
         "name": result.name,
         "latest_price": result.latest_price,
         "latest_date": result.latest_date,
+        "price_label": result.price_label,
         "signal": signal_to_dict(result.signal),
         "score": result.score,
         "reasons": result.reasons,

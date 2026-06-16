@@ -11,7 +11,14 @@ from smart_stock.config import (
     IndicatorConfig,
     StrategyConfig,
 )
-from smart_stock.data import DataFetchError, fetch_daily_bars_safe, get_stock_name, normalize_code, search_stock
+from smart_stock.data import (
+    DataFetchError,
+    attach_live_spot_price,
+    fetch_daily_bars_safe,
+    get_stock_name,
+    normalize_code,
+    search_stock,
+)
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import AnalysisResult
 from smart_stock.backtest import BacktestConfig, run_backtest
@@ -70,6 +77,7 @@ def get_stock_detail(
             "请重启 Web 服务后执行 python main.py check-network，再刷新页面。",
         )
 
+    analysis = attach_live_spot_price(analysis, normalized_code, data_source)
     return StockDetail(analysis=analysis, chart=dataframe_to_chart(enriched), data_source=data_source)
 
 

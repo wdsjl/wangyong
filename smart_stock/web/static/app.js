@@ -551,7 +551,7 @@ function renderAnalysis(payload) {
   state.currentCode = analysis.code;
   renderWatchlistChips();
   elements.latestPrice.textContent = formatPrice(analysis.latest_price);
-  elements.latestDate.textContent = `最新交易日 ${analysis.latest_date}`;
+  elements.latestDate.textContent = `${analysis.price_label || "收盘价"} · ${analysis.latest_date}`;
   elements.signalPill.textContent = analysis.signal.value;
   elements.signalPill.className = `signal-pill ${signalClassMap[analysis.signal.key] || "hold"}`;
   elements.scoreText.textContent = `${analysis.score >= 0 ? "+" : ""}${analysis.score.toFixed(3)}`;

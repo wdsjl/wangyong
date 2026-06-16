@@ -179,6 +179,18 @@ def diagnose_network(code: str = "000815") -> list[str]:
     except Exception as exc:
         lines.append(f"东方财富 urllib 直连: 失败（{exc}）")
         lines.append("若使用 Clash/V2Ray TUN 模式，请暂时关闭 TUN 或切换为「规则/全局但不劫持」后重试")
+        return lines
+
+    try:
+        from smart_stock.eastmoney import fetch_spot_quote
+
+        spot = fetch_spot_quote(code)
+        if spot is None:
+            lines.append("实时报价: 未返回有效价格")
+        else:
+            lines.append(f"实时报价: {spot.name} {spot.price:.2f} 元")
+    except Exception as exc:
+        lines.append(f"实时报价: 失败（{exc}）")
 
     return lines
 

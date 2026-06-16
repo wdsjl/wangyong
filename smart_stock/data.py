@@ -9,6 +9,7 @@ import pandas as pd
 from smart_stock import eastmoney
 from smart_stock.network import format_fetch_error, without_system_proxy
 from smart_stock.sample_data import generate_demo_bars, get_demo_name, search_demo_stocks
+from smart_stock.models import AnalysisResult
 
 try:
     import akshare as ak
@@ -106,6 +107,30 @@ def get_stock_name(code: str, demo: bool = False) -> str:
         except Exception:
             return code
     return code
+
+
+def attach_live_spot_price(result: AnalysisResult, code: str, data_source: str) -> AnalysisResult:
+    """实盘模式下用东方财富实时报价覆盖顶部展示价格。"""
+    if data_source != "live":
+        result.price_label = "演示价" if data_source == "demo" else "模拟价"
+        return result
+
+    try:
+        spot = eastmoney.fetch_spot_quote(code)
+    except Exception:
+        result.price_label = "收盘价"
+        return result
+
+    if spot is None:
+        result.price_label = "收盘价"
+        return result
+
+    result.latest_price = spot.price
+    result.price_label = "实时价"
+    result.latest_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if spot.name:
+        result.name = spot.name
+    return result
 
 
 def fetch_daily_bars(code: str, days: int = 180, demo: bool = False) -> pd.DataFrame:

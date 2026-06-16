@@ -8,7 +8,14 @@ from smart_stock.config import (
     IndicatorConfig,
     StrategyConfig,
 )
-from smart_stock.data import DataFetchError, fetch_daily_bars_safe, get_stock_name, normalize_code, search_stock
+from smart_stock.data import (
+    DataFetchError,
+    attach_live_spot_price,
+    fetch_daily_bars_safe,
+    get_stock_name,
+    normalize_code,
+    search_stock,
+)
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import AnalysisResult, Signal
 from smart_stock.strategy import generate_signal
@@ -56,7 +63,7 @@ def analyze_stock(
             "【自动回退】实盘行情拉取失败，已改用本地模拟数据（价格不真实）。"
             "请执行 python main.py check-network 排查后重试。",
         )
-    return result
+    return attach_live_spot_price(result, normalized_code, data_source)
 
 
 def analyze_many(

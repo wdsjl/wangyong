@@ -32,7 +32,7 @@ def render_analysis(result: AnalysisResult) -> None:
     style = SIGNAL_STYLE.get(result.signal, "white")
     header = (
         f"[bold]{result.name} ({result.code})[/bold]\n"
-        f"最新价: [cyan]{result.latest_price:.2f}[/cyan]  "
+        f"最新价: [cyan]{result.latest_price:.2f}[/cyan] ({result.price_label})  "
         f"日期: {result.latest_date}\n"
         f"信号: [{style}]{result.signal.value}[/]  "
         f"综合评分: [bold]{result.score:+.3f}[/bold]"

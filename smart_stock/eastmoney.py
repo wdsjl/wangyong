@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -9,6 +10,7 @@ import pandas as pd
 from smart_stock.network import direct_http_get_json
 
 KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+SPOT_URL = "https://push2.eastmoney.com/api/qt/stock/get"
 SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
 SUGGEST_TOKEN = "D43BF5C8E79E06BEE2A6F6E3E8C4B5"
 
@@ -28,6 +30,59 @@ KLINE_COLUMNS = [
     "涨跌额",
     "换手率",
 ]
+
+
+@dataclass
+class SpotQuote:
+    code: str
+    name: str
+    price: float
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    prev_close: float | None = None
+    change_pct: float | None = None
+
+
+def _parse_number(value: object) -> float | None:
+    if value in (None, "", "-"):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def fetch_spot_quote(code: str) -> SpotQuote | None:
+    """拉取东方财富实时报价。"""
+    normalized_code = "".join(ch for ch in code if ch.isdigit()).zfill(6)
+    payload = direct_http_get_json(
+        SPOT_URL,
+        params={
+            "fltt": "2",
+            "invt": "2",
+            "fields": "f43,f44,f45,f46,f57,f58,f60,f169,f170",
+            "secid": to_secid(normalized_code),
+        },
+    )
+    data = payload.get("data") or {}
+    price = _parse_number(data.get("f43"))
+    if price is None:
+        return None
+
+    return SpotQuote(
+        code=str(data.get("f57") or normalized_code),
+        name=str(data.get("f58") or normalized_code),
+        price=price,
+        open=_parse_number(data.get("f46")),
+        high=_parse_number(data.get("f44")),
+        low=_parse_number(data.get("f45")),
+        prev_close=_parse_number(data.get("f60")),
+        change_pct=_parse_number(data.get("f170")),
+    )
 
 
 def to_secid(code: str) -> str:

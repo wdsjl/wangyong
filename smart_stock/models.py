@@ -37,4 +37,5 @@ class AnalysisResult:
     score: float
     reasons: list[str] = field(default_factory=list)
     indicators: IndicatorSnapshot | None = None
+    price_label: str = "收盘价"
     risk_note: str = "本系统仅供学习研究，不构成投资建议。"
