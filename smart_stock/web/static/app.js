@@ -16,6 +16,7 @@ const state = {
   indicatorChart: null,
   compareChart: null,
   backtestChart: null,
+  analyzeRequestId: 0,
 };
 
 const elements = {
@@ -629,7 +630,7 @@ function renderAnalysis(payload) {
     )
     .join("");
 
-  renderCharts();
+  requestAnimationFrame(() => renderCharts());
 }
 
 function renderWatchlist(items) {
@@ -722,12 +723,11 @@ function baseChartOptions(extra = {}) {
 }
 
 function buildCandlestickData(chart) {
-  return chart.dates.map((date, index) => ({
-    x: date,
-    o: chart.open[index],
-    h: chart.high[index],
-    l: chart.low[index],
-    c: chart.close[index],
+  return chart.dates.map((_, index) => ({
+    o: Number(chart.open[index]),
+    h: Number(chart.high[index]),
+    l: Number(chart.low[index]),
+    c: Number(chart.close[index]),
   }));
 }
 
@@ -743,10 +743,11 @@ function buildVolumeColors(chart) {
 }
 
 function buildLineDataset(label, data, color, dashed = false) {
+  const series = Array.isArray(data) ? data.map((value) => (value == null ? null : Number(value))) : [];
   return {
     type: "line",
     label,
-    data,
+    data: series,
     borderColor: color,
     backgroundColor: color,
     borderWidth: dashed ? 1 : 1.5,
@@ -754,7 +755,27 @@ function buildLineDataset(label, data, color, dashed = false) {
     pointRadius: 0,
     tension: 0.2,
     spanGaps: true,
+    yAxisID: "y",
   };
+}
+
+function buildPriceChartOptions(extra = {}) {
+  return baseChartOptions({
+    parsing: false,
+    ...extra,
+    scales: {
+      x: {
+        type: "category",
+        ticks: { color: "#94a3b8", maxTicksLimit: 10 },
+        grid: { color: "rgba(148, 163, 184, 0.08)" },
+      },
+      y: {
+        ticks: { color: "#94a3b8" },
+        grid: { color: "rgba(148, 163, 184, 0.08)" },
+      },
+      ...(extra.scales || {}),
+    },
+  });
 }
 
 function buildPriceDatasets(chart) {
@@ -990,13 +1011,7 @@ function renderCharts() {
         labels: chart.dates,
         datasets: buildPriceDatasets(chart),
       },
-      options: baseChartOptions({
-        scales: {
-          x: {
-            type: "category",
-          },
-        },
-      }),
+      options: buildPriceChartOptions(),
     });
 
     const indicatorCtx = document.getElementById("indicatorChart");
@@ -1016,10 +1031,8 @@ function renderCharts() {
       const indicatorCtx = document.getElementById("indicatorChart");
       state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
       attachChartInteractions(state.indicatorChart);
-      showChartMessage(
-        "priceChartEmpty",
-        `蜡烛图加载失败，已回退为收盘价折线图。请 Ctrl+F5 强刷页面后重试。(${error.message})`
-      );
+      hideChartMessage("priceChartEmpty");
+      setStatus(`蜡烛图插件异常，已显示收盘价折线图（${error.message}）`, true);
     } catch (fallbackError) {
       showChartMessage("priceChartEmpty", `K 线加载失败：${error.message}`);
       showChartMessage("indicatorChartEmpty", `副图加载失败：${fallbackError.message}`);
@@ -1042,13 +1055,7 @@ function renderPriceChartFallback(chart) {
         buildLineDataset("MA20", chart.ma20, chartColors.ma20),
       ],
     },
-    options: baseChartOptions({
-      scales: {
-        x: {
-          type: "category",
-        },
-      },
-    }),
+    options: buildPriceChartOptions(),
   });
   attachChartInteractions(state.priceChart);
   setCanvasVisible("priceChart", true);
@@ -1162,13 +1169,7 @@ function rerenderPriceChart() {
         labels: state.chartData.dates,
         datasets: buildPriceDatasets(state.chartData),
       },
-      options: baseChartOptions({
-        scales: {
-          x: {
-            type: "category",
-          },
-        },
-      }),
+      options: buildPriceChartOptions(),
     });
     attachChartInteractions(state.priceChart);
     hideChartMessage("priceChartEmpty");
@@ -1337,11 +1338,13 @@ async function loadAnalysis(retryCount = 0) {
   const code = elements.searchInput.value.trim() || state.currentCode;
   const days = elements.daysSelect.value;
   state.currentCode = code;
+  const requestId = ++state.analyzeRequestId;
 
   setStatus(`正在分析 ${code}...`);
   showChartMessage("priceChartEmpty", `正在加载 ${code} 的 K 线...`);
   try {
     const payload = await api(`/api/analyze/${encodeURIComponent(code)}?days=${days}`);
+    if (requestId !== state.analyzeRequestId) return;
     renderAnalysis(payload);
     const sourceHint = payload.demo_fallback
       ? "（网络波动，已临时使用模拟 K 线，可点分析重试）"
@@ -1350,6 +1353,7 @@ async function loadAnalysis(retryCount = 0) {
         : "（演示数据）";
     setStatus(`分析完成：${payload.analysis.name}${sourceHint}`);
   } catch (error) {
+    if (requestId !== state.analyzeRequestId) return;
     if (retryCount < 2) {
       setStatus(`行情拉取失败，正在重试 (${retryCount + 1}/2)...`);
       await new Promise((resolve) => setTimeout(resolve, 1200));
