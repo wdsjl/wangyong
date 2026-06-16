@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from smart_stock.analysis_builder import attach_monitoring
 from smart_stock.analyzer import analyze_many
 from smart_stock.config import (
     DEFAULT_INDICATOR_CONFIG,
@@ -77,6 +78,13 @@ def get_stock_detail(
         )
 
     analysis = attach_live_spot_price(analysis, normalized_code, data_source)
+    analysis = attach_monitoring(
+        analysis,
+        enriched,
+        data_source=data_source,
+        demo=use_demo_names,
+        strategy_config=strategy_config,
+    )
     chart = dataframe_to_chart(enriched)
     markers = compute_trade_markers(enriched)
     chart["buy_markers"] = markers["buy_markers"]

@@ -66,6 +66,15 @@ const elements = {
   crosshairInfo: document.getElementById("crosshairInfo"),
   priceChartEmpty: document.getElementById("priceChartEmpty"),
   indicatorChartEmpty: document.getElementById("indicatorChartEmpty"),
+  trendScoreText: document.getElementById("trendScoreText"),
+  trendLabelText: document.getElementById("trendLabelText"),
+  resonanceText: document.getElementById("resonanceText"),
+  resonanceHitsText: document.getElementById("resonanceHitsText"),
+  atrStopText: document.getElementById("atrStopText"),
+  volumeSignalText: document.getElementById("volumeSignalText"),
+  mainFlowText: document.getElementById("mainFlowText"),
+  obvTrendText: document.getElementById("obvTrendText"),
+  inlineAlerts: document.getElementById("inlineAlerts"),
 };
 
 const signalClassMap = {
@@ -102,6 +111,7 @@ const chartColors = {
   histNeg: "#ef4444",
   rsi: "#c084fc",
   volume: "#64748b",
+  obv: "#38bdf8",
   crosshair: "rgba(148, 163, 184, 0.55)",
 };
 
@@ -544,30 +554,66 @@ function detectSignalChanges(items, previous) {
     }));
 }
 
-function renderAlerts(alerts) {
-  if (!alerts.length) {
-    elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化告警</div>';
+function collectResonanceAlerts(items) {
+  return items
+    .filter((item) => item.monitoring?.resonance_level === "strong")
+    .map((item) => ({
+      code: item.code,
+      name: item.name,
+      side: item.monitoring.resonance_side,
+      hits: item.monitoring.resonance_hits || [],
+      message:
+        item.monitoring.resonance_side === "bullish"
+          ? `强势共振看多：${(item.monitoring.resonance_hits || []).slice(0, 3).join("、")}`
+          : `强势共振看空：${(item.monitoring.resonance_hits || []).slice(0, 3).join("、")}`,
+    }));
+}
+
+function renderAlerts(alerts, resonanceAlerts = []) {
+  const merged = [
+    ...alerts.map((alert) => ({
+      title: `${alert.name} (${alert.code})`,
+      meta: `信号 ${alert.from} → ${alert.to} · 评分 ${alert.score >= 0 ? "+" : ""}${Number(alert.score).toFixed(3)}`,
+      kind: "signal",
+    })),
+    ...resonanceAlerts.map((alert) => ({
+      title: `${alert.name} (${alert.code})`,
+      meta: alert.message,
+      kind: "resonance",
+    })),
+  ];
+
+  if (!merged.length) {
+    elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化或共振预警</div>';
     return;
   }
 
-  elements.alertPanel.innerHTML = alerts
+  elements.alertPanel.innerHTML = merged
     .map(
       (alert) => `
-        <div class="alert-item">
-          <strong>${alert.name} (${alert.code})</strong>
-          <div class="meta">信号 ${alert.from} → ${alert.to} · 评分 ${alert.score >= 0 ? "+" : ""}${Number(alert.score).toFixed(3)}</div>
+        <div class="alert-item ${alert.kind}">
+          <strong>${alert.title}</strong>
+          <div class="meta">${alert.meta}</div>
         </div>
       `
     )
     .join("");
 }
 
-function notifySignalChanges(alerts) {
-  if (!state.notifyEnabled || !alerts.length || !("Notification" in window)) return;
+function notifySignalChanges(alerts, resonanceAlerts = []) {
+  if (!state.notifyEnabled || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
+  const all = [...alerts, ...resonanceAlerts];
+  if (!all.length) return;
 
-  const body = alerts.map((alert) => `${alert.name}: ${alert.from} → ${alert.to}`).join("\n");
-  new Notification("自选股信号变化", { body });
+  const body = all
+    .map((alert) =>
+      alert.from
+        ? `${alert.name}: ${alert.from} → ${alert.to}`
+        : `${alert.name}: ${alert.message}`
+    )
+    .join("\n");
+  new Notification("自选股盯盘提醒", { body });
 }
 
 async function requestNotificationPermission() {
@@ -825,6 +871,47 @@ function renderSearchResults(items) {
   });
 }
 
+function formatFlow(value) {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+  const amount = Number(value);
+  const abs = Math.abs(amount);
+  const sign = amount >= 0 ? "+" : "-";
+  if (abs >= 100000000) return `${sign}${(abs / 100000000).toFixed(2)}亿`;
+  if (abs >= 10000) return `${sign}${(abs / 10000).toFixed(1)}万`;
+  return `${sign}${abs.toFixed(0)}`;
+}
+
+function resonanceLabel(level, side) {
+  if (level === "strong") return side === "bullish" ? "强势共振看多" : "强势共振看空";
+  if (level === "weak") return side === "bullish" ? "弱共振偏多" : "弱共振偏空";
+  return "无共振";
+}
+
+function renderMonitoringPanel(monitoring) {
+  if (!monitoring || !elements.trendScoreText) return;
+
+  elements.trendScoreText.textContent = monitoring.trend_score ?? "--";
+  elements.trendLabelText.textContent = monitoring.trend_label || "--";
+  elements.resonanceText.textContent = resonanceLabel(monitoring.resonance_level, monitoring.resonance_side);
+  elements.resonanceHitsText.textContent = (monitoring.resonance_hits || []).slice(0, 3).join(" · ") || "暂无";
+  elements.atrStopText.textContent =
+    monitoring.atr_stop_loss == null ? "--" : formatPrice(monitoring.atr_stop_loss);
+  elements.volumeSignalText.textContent = monitoring.volume_signal || monitoring.boll_position || "--";
+
+  const flow = monitoring.money_flow || {};
+  elements.mainFlowText.textContent = formatFlow(flow.main_net_inflow);
+  elements.obvTrendText.textContent = `OBV ${monitoring.obv_trend || "flat"}`;
+
+  const alerts = monitoring.alerts || [];
+  if (!alerts.length) {
+    elements.inlineAlerts.innerHTML = '<li class="muted">暂无即时预警</li>';
+    return;
+  }
+  elements.inlineAlerts.innerHTML = alerts
+    .map((alert) => `<li class="alert-${alert.level}">${alert.message}</li>`)
+    .join("");
+}
+
 function renderAnalysis(payload) {
   const { analysis } = payload;
   state.chartData = payload.chart;
@@ -851,6 +938,7 @@ function renderAnalysis(payload) {
   elements.scoreFill.style.background = scoreToColor(analysis.score);
   elements.reasonList.innerHTML = analysis.reasons.map((item) => `<li>${item}</li>`).join("");
   elements.riskNote.textContent = analysis.risk_note;
+  renderMonitoringPanel(analysis.monitoring);
 
   const indicators = analysis.indicators || {};
   const metricItems = [
@@ -858,9 +946,13 @@ function renderAnalysis(payload) {
     ["MA10", indicators.ma10],
     ["MA20", indicators.ma20],
     ["MA60", indicators.ma60],
+    ["MA120", indicators.ma120],
+    ["BIAS20", indicators.bias20],
     ["RSI", indicators.rsi],
+    ["ATR", indicators.atr],
+    ["OBV", indicators.obv],
+    ["量比", indicators.volume_ratio],
     ["MACD", indicators.macd],
-    ["MACD 信号", indicators.macd_signal],
     ["MACD 柱", indicators.macd_hist],
   ];
 
@@ -869,7 +961,7 @@ function renderAnalysis(payload) {
       ([label, value]) => `
         <div class="metric">
           <span>${label}</span>
-          <strong>${value == null ? "-" : formatPrice(value)}</strong>
+          <strong>${value == null ? "-" : label.includes("比") ? Number(value).toFixed(2) : formatPrice(value)}</strong>
         </div>
       `
     )
@@ -890,10 +982,11 @@ function renderWatchlist(items) {
         <div class="watch-item" data-code="${item.code}">
           <div>
             <strong>${item.name}</strong>
-            <div class="meta">${item.code} · ${formatPrice(item.latest_price)}</div>
+            <div class="meta">${item.code} · ${formatPrice(item.latest_price)}${item.monitoring ? ` · 趋势${item.monitoring.trend_score}` : ""}</div>
           </div>
           <div class="watch-item-actions">
             <div class="signal-pill ${signalClassMap[item.signal.key] || "hold"}">${item.signal.value}</div>
+            ${item.monitoring?.resonance_level === "strong" ? '<span class="resonance-badge">共振</span>' : ""}
             <button type="button" class="icon-btn watch-remove-btn" data-code="${item.code}" title="从自选删除">×</button>
           </div>
         </div>
@@ -1353,7 +1446,20 @@ function buildIndicatorConfig(chart, type) {
             data: chart.volume,
             backgroundColor: buildVolumeColors(chart),
           },
+          buildLineDataset("VMA5", chart.vma5, chartColors.ma5),
+          buildLineDataset("VMA20", chart.vma20, chartColors.ma20),
         ],
+      },
+      options: baseChartOptions(),
+    };
+  }
+
+  if (type === "obv") {
+    return {
+      type: "line",
+      data: {
+        labels: chart.dates,
+        datasets: [buildLineDataset("OBV", chart.obv, chartColors.obv)],
       },
       options: baseChartOptions(),
     };
@@ -1626,13 +1732,15 @@ async function refreshWatchlist({ detectChanges = false, silent = false, withCom
       `/api/batch?codes=${encodeURIComponent(codes)}&days=${days}&detect_changes=${detectChanges}`
     );
     const alerts = detectChanges ? payload.alerts || detectSignalChanges(payload.items, loadSignalSnapshot()) : [];
+    const resonanceAlerts = detectChanges ? collectResonanceAlerts(payload.items) : [];
     saveSignalSnapshot(payload.items);
     renderWatchlist(payload.items);
     if (detectChanges) {
-      renderAlerts(alerts);
-      notifySignalChanges(alerts);
+      renderAlerts(alerts, resonanceAlerts);
+      notifySignalChanges(alerts, resonanceAlerts);
+      const total = alerts.length + resonanceAlerts.length;
       if (!silent) {
-        setStatus(alerts.length ? `检测到 ${alerts.length} 条信号变化` : "监控刷新完成，信号无变化");
+        setStatus(total ? `检测到 ${total} 条盯盘提醒` : "监控刷新完成，暂无新提醒");
       }
     } else if (!silent) {
       setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到数据库）`);

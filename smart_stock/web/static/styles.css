@@ -338,6 +338,77 @@ button.small {
   gap: 18px;
 }
 
+.monitoring-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.monitoring-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.monitor-card {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.monitor-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monitor-card strong {
+  font-size: 18px;
+}
+
+.monitor-card small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.alert-inline-list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.alert-inline-list .alert-strong,
+.alert-item.resonance strong {
+  color: #fbbf24;
+}
+
+.alert-inline-list .alert-danger {
+  color: #fca5a5;
+}
+
+.alert-inline-list .alert-warning {
+  color: #fdba74;
+}
+
+.resonance-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+.alert-item.resonance {
+  border-left: 3px solid #fbbf24;
+}
+
 .chart-card canvas {
   width: 100% !important;
 }

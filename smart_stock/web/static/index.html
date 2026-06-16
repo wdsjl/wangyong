@@ -57,6 +57,31 @@
                   <div class="score-fill" id="scoreFill"></div>
                 </div>
               </div>
+              <div class="monitoring-panel" id="monitoringPanel">
+                <div class="monitoring-grid">
+                  <div class="monitor-card">
+                    <span>趋势分</span>
+                    <strong id="trendScoreText">--</strong>
+                    <small id="trendLabelText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>共振</span>
+                    <strong id="resonanceText">--</strong>
+                    <small id="resonanceHitsText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>ATR止损</span>
+                    <strong id="atrStopText">--</strong>
+                    <small id="volumeSignalText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>主力资金</span>
+                    <strong id="mainFlowText">--</strong>
+                    <small id="obvTrendText">--</small>
+                  </div>
+                </div>
+                <ul class="alert-inline-list" id="inlineAlerts"></ul>
+              </div>
               <div class="analysis-actions">
                 <button class="secondary small" id="backtestBtn" type="button">策略回测</button>
                 <button class="secondary small" id="insightBtn" type="button">AI 解读</button>
@@ -161,6 +186,7 @@
                 <button class="secondary" data-chart="rsi">RSI</button>
                 <button class="secondary" data-chart="boll">布林带</button>
                 <button class="secondary" data-chart="volume">成交量</button>
+                <button class="secondary" data-chart="obv">OBV</button>
               </div>
               <div class="chart-empty" id="indicatorChartEmpty"></div>
               <canvas id="indicatorChart"></canvas>

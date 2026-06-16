@@ -58,6 +58,9 @@ def test_api_analyze_demo(client):
         assert len(payload["chart"][field]) == 120
     assert "buy_markers" in payload["chart"]
     assert "sell_markers" in payload["chart"]
+    assert "monitoring" in payload["analysis"]
+    assert "obv" in payload["chart"]
+    assert "atr" in payload["chart"]
 
 
 def test_api_batch_demo(client):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from smart_stock.analysis_builder import attach_monitoring
 from smart_stock.config import (
     DEFAULT_INDICATOR_CONFIG,
     DEFAULT_STRATEGY_CONFIG,
@@ -62,7 +63,14 @@ def analyze_stock(
             0,
             "【网络波动】实盘行情暂时拉取失败，已展示模拟 K 线。请稍后重试 analyze 命令刷新实盘数据。",
         )
-    return attach_live_spot_price(result, normalized_code, data_source)
+    result = attach_live_spot_price(result, normalized_code, data_source)
+    return attach_monitoring(
+        result,
+        enriched,
+        data_source=data_source,
+        demo=use_demo_names,
+        strategy_config=strategy_config,
+    )
 
 
 def analyze_many(

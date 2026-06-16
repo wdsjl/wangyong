@@ -23,6 +23,8 @@ def test_indicator_pipeline():
     assert snapshot.rsi is not None
     assert snapshot.macd is not None
     assert snapshot.boll_upper is not None
+    assert snapshot.obv is not None
+    assert snapshot.atr is not None
 
 
 def test_signal_generation():

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from smart_stock.backtest import BacktestResult
-from smart_stock.models import AnalysisResult, IndicatorSnapshot, Signal
+from smart_stock.models import AnalysisResult, IndicatorSnapshot, MonitoringSnapshot, Signal
 
 
 def signal_to_dict(signal: Signal) -> dict[str, str]:
@@ -21,6 +21,15 @@ def indicator_to_dict(indicators: IndicatorSnapshot | None) -> dict[str, float |
     if indicators is None:
         return {}
     return asdict(indicators)
+
+
+def monitoring_to_dict(monitoring: MonitoringSnapshot | None) -> dict[str, Any]:
+    if monitoring is None:
+        return {}
+    payload = asdict(monitoring)
+    if monitoring.money_flow is not None:
+        payload["money_flow"] = asdict(monitoring.money_flow)
+    return payload
 
 
 def analysis_to_dict(result: AnalysisResult) -> dict[str, Any]:
@@ -34,6 +43,7 @@ def analysis_to_dict(result: AnalysisResult) -> dict[str, Any]:
         "score": result.score,
         "reasons": result.reasons,
         "indicators": indicator_to_dict(result.indicators),
+        "monitoring": monitoring_to_dict(result.monitoring),
         "risk_note": result.risk_note,
     }
 
@@ -51,6 +61,10 @@ def dataframe_to_chart(df: pd.DataFrame) -> dict[str, list[Any]]:
         "ma10",
         "ma20",
         "ma60",
+        "ma120",
+        "vma5",
+        "vma20",
+        "volume_ratio",
         "rsi",
         "macd",
         "macd_signal",
@@ -58,6 +72,8 @@ def dataframe_to_chart(df: pd.DataFrame) -> dict[str, list[Any]]:
         "boll_upper",
         "boll_middle",
         "boll_lower",
+        "obv",
+        "atr",
     ]
 
     payload: dict[str, list[Any]] = {"dates": []}
@@ -70,8 +86,10 @@ def dataframe_to_chart(df: pd.DataFrame) -> dict[str, list[Any]]:
             value = row.get(column)
             if value is None or (isinstance(value, float) and np.isnan(value)):
                 payload[column].append(None)
+            elif column == "volume":
+                payload[column].append(int(value))
             else:
-                payload[column].append(round(float(value), 4) if column != "volume" else int(value))
+                payload[column].append(round(float(value), 4))
 
     return payload
 

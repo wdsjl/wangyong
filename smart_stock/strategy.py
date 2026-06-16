@@ -113,24 +113,58 @@ def score_volatility(price: float, indicators: IndicatorSnapshot) -> tuple[float
     return score, reasons
 
 
-def score_volume(df: pd.DataFrame) -> tuple[float, list[str]]:
+def score_volume(df: pd.DataFrame, indicators: IndicatorSnapshot) -> tuple[float, list[str]]:
     """成交量变化评分。"""
     if len(df) < 6 or "volume" not in df.columns:
         return 0.0, []
 
     latest = df.iloc[-1]
-    avg_volume = df["volume"].tail(6).iloc[:-1].mean()
-    if avg_volume <= 0 or pd.isna(avg_volume):
-        return 0.0, []
+    ratio = indicators.volume_ratio
+    if ratio is None or pd.isna(ratio):
+        avg_volume = df["volume"].tail(6).iloc[:-1].mean()
+        if avg_volume <= 0 or pd.isna(avg_volume):
+            return 0.0, []
+        ratio = latest["volume"] / avg_volume
 
-    ratio = latest["volume"] / avg_volume
     if ratio > 1.5 and latest["close"] > latest["open"]:
-        return 0.2, ["放量上涨，资金关注度提升"]
+        return 0.25, ["放量上涨，资金关注度提升"]
     if ratio > 1.5 and latest["close"] < latest["open"]:
-        return -0.2, ["放量下跌，抛压加重"]
+        return -0.25, ["放量下跌，抛压加重"]
+    if ratio > 1.2 and latest["close"] > latest["open"]:
+        return 0.1, ["温和放量上攻"]
     if ratio < 0.7:
         return -0.05, ["成交量萎缩，趋势动能不足"]
     return 0.0, []
+
+
+def score_obv(df: pd.DataFrame, price: float, indicators: IndicatorSnapshot) -> tuple[float, list[str]]:
+    """OBV 能量潮评分。"""
+    if len(df) < 6 or "obv" not in df.columns:
+        return 0.0, []
+
+    recent = df["obv"].tail(5)
+    delta = float(recent.iloc[-1] - recent.iloc[0])
+    score = 0.0
+    reasons: list[str] = []
+
+    if delta > 0 and price >= (indicators.ma20 or price):
+        score += 0.15
+        reasons.append("OBV 上行，资金流入")
+    elif delta < 0 and price <= (indicators.ma20 or price):
+        score -= 0.15
+        reasons.append("OBV 下行，资金流出")
+
+    if len(df) >= 10:
+        price_up = price > float(df.iloc[-10]["close"])
+        obv_up = float(df.iloc[-1]["obv"]) > float(df.iloc[-10]["obv"])
+        if price_up and not obv_up:
+            score -= 0.1
+            reasons.append("价涨 OBV 不涨，警惕顶背离")
+        if not price_up and obv_up:
+            score += 0.1
+            reasons.append("价跌 OBV 不跌，或有底部吸筹")
+
+    return score, reasons
 
 
 def generate_signal(
@@ -147,7 +181,8 @@ def generate_signal(
         score_trend(price, indicators),
         score_momentum(indicators),
         score_volatility(price, indicators),
-        score_volume(df),
+        score_volume(df, indicators),
+        score_obv(df, price, indicators),
     ):
         total_score += partial_score
         reasons.extend(partial_reasons)

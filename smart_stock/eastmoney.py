@@ -42,6 +42,10 @@ class SpotQuote:
     low: float | None = None
     prev_close: float | None = None
     change_pct: float | None = None
+    main_net_inflow: float | None = None
+    large_net_inflow: float | None = None
+    super_large_net_inflow: float | None = None
+    main_net_pct: float | None = None
 
 
 def _parse_number(value: object) -> float | None:
@@ -64,7 +68,7 @@ def fetch_spot_quote(code: str) -> SpotQuote | None:
         params={
             "fltt": "2",
             "invt": "2",
-            "fields": "f43,f44,f45,f46,f57,f58,f60,f169,f170",
+            "fields": "f43,f44,f45,f46,f57,f58,f60,f169,f170,f62,f66,f69,f184",
             "secid": to_secid(normalized_code),
         },
     )
@@ -82,7 +86,16 @@ def fetch_spot_quote(code: str) -> SpotQuote | None:
         low=_parse_number(data.get("f45")),
         prev_close=_parse_number(data.get("f60")),
         change_pct=_parse_number(data.get("f170")),
+        main_net_inflow=_parse_number(data.get("f62")),
+        large_net_inflow=_parse_number(data.get("f66")),
+        super_large_net_inflow=_parse_number(data.get("f69")),
+        main_net_pct=_parse_number(data.get("f184")),
     )
+
+
+def fetch_money_flow(code: str) -> SpotQuote | None:
+    """拉取实时报价与主力资金流向。"""
+    return fetch_spot_quote(code)
 
 
 def to_secid(code: str) -> str:
