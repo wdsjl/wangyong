@@ -331,6 +331,27 @@ async function persistWatchlistToServer(codes) {
   }
 }
 
+function selectStock(code, { analyze = true } = {}) {
+  const normalized = normalizeWatchCode(code);
+  if (!normalized) return;
+  state.currentCode = normalized;
+  elements.searchInput.value = normalized;
+  renderWatchlistChips();
+  highlightActiveStock(normalized);
+  if (analyze) {
+    void loadAnalysis();
+  }
+}
+
+function highlightActiveStock(code) {
+  document.querySelectorAll(".watch-item").forEach((node) => {
+    node.classList.toggle("active", node.dataset.code === code);
+  });
+  document.querySelectorAll(".result-item").forEach((node) => {
+    node.classList.toggle("active", node.dataset.code === code);
+  });
+}
+
 function setWatchlistCodes(codes, { persist = true } = {}) {
   state.watchlistCodes = [...new Set(codes.map(normalizeWatchCode).filter(Boolean))];
   elements.watchInput.value = state.watchlistCodes.join(",");
@@ -388,7 +409,7 @@ async function bootstrapWatchlist() {
   }
   setWatchlistCodes(codes, { persist: false });
   if (codes.length) {
-    await persistWatchlistToServer(codes);
+    void persistWatchlistToServer(codes);
     saveWatchlistToStorage(codes);
   }
 }
@@ -416,10 +437,7 @@ function renderWatchlistChips() {
 
   elements.watchlistChips.querySelectorAll(".chip-main").forEach((button) => {
     button.addEventListener("click", () => {
-      state.currentCode = button.dataset.code;
-      elements.searchInput.value = state.currentCode;
-      renderWatchlistChips();
-      loadAnalysis();
+      selectStock(button.dataset.code);
     });
   });
 
@@ -661,10 +679,20 @@ async function api(path, options = {}) {
   if (options.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(path, { ...options, headers });
-  const payload = await response.json();
+  let response;
+  try {
+    response = await fetch(path, { ...options, headers });
+  } catch {
+    throw new Error("无法连接后端，请确认终端中正在运行：python web_main.py --port 8000");
+  }
+
+  let payload = {};
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    payload = await response.json();
+  }
   if (!response.ok) {
-    throw new Error(payload.detail || "请求失败");
+    throw new Error(payload.detail || `请求失败 (${response.status})`);
   }
   return payload;
 }
@@ -771,9 +799,7 @@ function renderSearchResults(items) {
   elements.searchResults.querySelectorAll(".result-item").forEach((node) => {
     node.addEventListener("click", (event) => {
       if (event.target.closest(".add-watch-btn")) return;
-      state.currentCode = node.dataset.code;
-      elements.searchInput.value = state.currentCode;
-      loadAnalysis();
+      selectStock(node.dataset.code);
     });
   });
 
@@ -873,10 +899,9 @@ function renderWatchlist(items) {
   });
 
   elements.watchlist.querySelectorAll(".watch-item").forEach((node) => {
-    node.addEventListener("click", () => {
-      state.currentCode = node.dataset.code;
-      elements.searchInput.value = state.currentCode;
-      loadAnalysis();
+    node.addEventListener("click", (event) => {
+      if (event.target.closest(".watch-remove-btn")) return;
+      selectStock(node.dataset.code);
     });
   });
 }
@@ -1527,9 +1552,16 @@ async function searchStocks() {
 }
 
 async function loadAnalysis(retryCount = 0) {
-  const code = elements.searchInput.value.trim() || state.currentCode;
+  const code = normalizeWatchCode(elements.searchInput.value.trim() || state.currentCode);
+  if (!code) {
+    setStatus("请输入股票代码", true);
+    return;
+  }
   const days = elements.daysSelect.value;
   state.currentCode = code;
+  elements.searchInput.value = code;
+  renderWatchlistChips();
+  highlightActiveStock(code);
   const requestId = ++state.analyzeRequestId;
 
   setStatus(`正在分析 ${code}...`);
@@ -1546,7 +1578,8 @@ async function loadAnalysis(retryCount = 0) {
     setStatus(`分析完成：${payload.analysis.name}${sourceHint}`);
   } catch (error) {
     if (requestId !== state.analyzeRequestId) return;
-    if (retryCount < 2) {
+    const isConnectionError = String(error.message).includes("无法连接后端");
+    if (!isConnectionError && retryCount < 2) {
       setStatus(`行情拉取失败，正在重试 (${retryCount + 1}/2)...`);
       await new Promise((resolve) => setTimeout(resolve, 1200));
       return loadAnalysis(retryCount + 1);
@@ -1555,6 +1588,7 @@ async function loadAnalysis(retryCount = 0) {
     showChartMessage("indicatorChartEmpty", "副图暂无数据");
     setCanvasVisible("priceChart", false);
     setCanvasVisible("indicatorChart", false);
+    elements.stockTitle.textContent = `已选中 ${code}（等待加载）`;
     setStatus(`${error.message}（可再次点击「分析」重试）`, true);
   }
 }
@@ -1699,15 +1733,44 @@ function bindEvents() {
 
 async function bootstrap() {
   bindEvents();
-  await bootstrapWatchlist();
-  await bootstrapMonitorControls();
-  await loadConfig();
+  try {
+    await bootstrapWatchlist();
+  } catch (error) {
+    console.warn("自选股加载失败", error);
+    setWatchlistCodes(loadWatchlistFromStorage(), { persist: false });
+  }
+  try {
+    await bootstrapMonitorControls();
+  } catch (error) {
+    console.warn("监控设置加载失败", error);
+    loadMonitorSettings();
+    elements.monitorToggle.checked = state.monitorEnabled;
+    elements.monitorInterval.value = String(state.monitorIntervalSec);
+    elements.notifyToggle.checked = state.notifyEnabled;
+    startMonitorTimer();
+  }
+  try {
+    await loadConfig();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
   elements.searchInput.value = state.currentCode;
-  await searchStocks();
-  await loadAnalysis();
+  try {
+    await searchStocks();
+  } catch (error) {
+    console.warn("搜索预加载失败", error);
+  }
+  try {
+    await loadAnalysis();
+  } catch (error) {
+    console.warn("首次分析失败", error);
+  }
   if (state.watchlistCodes.length) {
-    // 启动时只刷新自选股列表，避免与分析接口并发打满行情源
-    await refreshWatchlist({ detectChanges: false, silent: true, withCompare: false });
+    try {
+      await refreshWatchlist({ detectChanges: false, silent: true, withCompare: false });
+    } catch (error) {
+      console.warn("自选股批量刷新失败", error);
+    }
   }
 }
 

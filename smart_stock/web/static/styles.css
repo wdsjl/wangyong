@@ -173,6 +173,7 @@ button:disabled {
 }
 
 .result-item:hover,
+.watch-item.active,
 .watch-item:hover,
 .result-item.active {
   border-color: rgba(56, 189, 248, 0.35);
