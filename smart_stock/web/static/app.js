@@ -178,7 +178,58 @@ const tradeMarkerPlugin = {
   },
 };
 
-Chart.register(crosshairPlugin, tradeMarkerPlugin);
+const candlestickPlugin = {
+  id: "customCandlestick",
+  beforeDatasetsDraw(chart) {
+    if (chart.canvas.id !== "priceChart" || !state.chartData) return;
+
+    const chartData = state.chartData;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    if (!xScale || !yScale) return;
+
+    const ctx = chart.ctx;
+    const count = chartData.dates.length;
+    let barWidth = 8;
+    if (count > 1) {
+      const step = Math.abs(xScale.getPixelForValue(1) - xScale.getPixelForValue(0));
+      barWidth = Math.max(3, step * 0.55);
+    }
+
+    for (let index = 0; index < count; index += 1) {
+      const open = Number(chartData.open[index]);
+      const high = Number(chartData.high[index]);
+      const low = Number(chartData.low[index]);
+      const close = Number(chartData.close[index]);
+      if (![open, high, low, close].every(Number.isFinite)) continue;
+
+      const x = xScale.getPixelForValue(index);
+      const yHigh = yScale.getPixelForValue(high);
+      const yLow = yScale.getPixelForValue(low);
+      const yOpen = yScale.getPixelForValue(open);
+      const yClose = yScale.getPixelForValue(close);
+      const isUp = close >= open;
+      const fill = isUp ? chartColors.candleUp : chartColors.candleDown;
+      const stroke = isUp ? chartColors.candleBorderUp : chartColors.candleBorderDown;
+      const bodyTop = Math.min(yOpen, yClose);
+      const bodyBottom = Math.max(yOpen, yClose);
+      const bodyHeight = Math.max(1, bodyBottom - bodyTop);
+
+      ctx.save();
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, yHigh);
+      ctx.lineTo(x, yLow);
+      ctx.stroke();
+      ctx.fillStyle = fill;
+      ctx.fillRect(x - barWidth / 2, bodyTop, barWidth, bodyHeight);
+      ctx.restore();
+    }
+  },
+};
+
+Chart.register(crosshairPlugin, candlestickPlugin, tradeMarkerPlugin);
 
 function initChartEnvironment() {
   if (typeof Chart === "undefined") {
@@ -186,9 +237,6 @@ function initChartEnvironment() {
   }
   if (typeof ChartZoom !== "undefined") {
     Chart.register(ChartZoom);
-  }
-  if (!Chart.registry.getController("candlestick")) {
-    throw new Error("K 线插件未加载，请更新代码并重启 Web 服务");
   }
 }
 
@@ -795,13 +843,19 @@ function baseChartOptions(extra = {}) {
             return chart.dates[items[0].dataIndex] || "";
           },
           label(context) {
-            if (context.dataset.type === "candlestick") {
-              const raw = context.raw;
+            const chartData = state.chartData;
+            if (
+              chartData &&
+              context.dataIndex != null &&
+              context.chart.canvas.id === "priceChart" &&
+              context.dataset.label === "K线"
+            ) {
+              const index = context.dataIndex;
               return [
-                `开: ${formatPrice(raw.o)}`,
-                `高: ${formatPrice(raw.h)}`,
-                `低: ${formatPrice(raw.l)}`,
-                `收: ${formatPrice(raw.c)}`,
+                `开: ${formatPrice(chartData.open[index])}`,
+                `高: ${formatPrice(chartData.high[index])}`,
+                `低: ${formatPrice(chartData.low[index])}`,
+                `收: ${formatPrice(chartData.close[index])}`,
               ];
             }
             const value = context.parsed.y;
@@ -834,16 +888,32 @@ function baseChartOptions(extra = {}) {
   return options;
 }
 
-function buildCandlestickData(chart) {
-  return chart.dates.map((_, index) => {
-    const o = Number(chart.open[index]);
-    const h = Number(chart.high[index]);
-    const l = Number(chart.low[index]);
-    const c = Number(chart.close[index]);
-    if (![o, h, l, c].every(Number.isFinite)) {
-      return { o: 0, h: 0, l: 0, c: 0 };
-    }
-    return { o, h, l, c };
+function buildPriceChartDatasets(chart) {
+  return [
+    {
+      label: "K线",
+      data: chart.close,
+      borderColor: "transparent",
+      backgroundColor: "transparent",
+      pointRadius: 0,
+      borderWidth: 0,
+      order: 10,
+    },
+    { ...buildLineDataset("MA5", chart.ma5, chartColors.ma5), order: 1 },
+    { ...buildLineDataset("MA10", chart.ma10, chartColors.ma10), order: 2 },
+    { ...buildLineDataset("MA20", chart.ma20, chartColors.ma20), order: 3 },
+    { ...buildLineDataset("MA60", chart.ma60, chartColors.ma60), order: 4 },
+  ];
+}
+
+function createPriceChart(ctx, chart) {
+  return new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: chart.dates,
+      datasets: buildPriceChartDatasets(chart),
+    },
+    options: buildPriceChartOptions(),
   });
 }
 
@@ -891,26 +961,6 @@ function buildPriceChartOptions(extra = {}) {
       ...(extra.scales || {}),
     },
   });
-}
-
-function buildPriceDatasets(chart) {
-  return [
-    {
-      type: "candlestick",
-      label: "K线",
-      data: buildCandlestickData(chart),
-      color: {
-        up: chartColors.candleUp,
-        down: chartColors.candleDown,
-        unchanged: "#94a3b8",
-      },
-      borderColor: {
-        up: chartColors.candleBorderUp,
-        down: chartColors.candleBorderDown,
-        unchanged: "#94a3b8",
-      },
-    },
-  ];
 }
 
 function getIndicatorSummary(index) {
@@ -1109,75 +1159,23 @@ function renderCharts() {
   destroyCanvasChart("indicatorChart");
   if (renderToken !== state.chartRenderToken) return;
 
-  try {
-    const priceCtx = releaseCanvas("priceChart");
-    if (!priceCtx || renderToken !== state.chartRenderToken) return;
-
-    state.priceChart = new Chart(priceCtx, {
-      type: "candlestick",
-      data: {
-        labels: chart.dates,
-        datasets: buildPriceDatasets(chart),
-      },
-      options: buildPriceChartOptions(),
-    });
-
-    const indicatorCtx = releaseCanvas("indicatorChart");
-    if (!indicatorCtx || renderToken !== state.chartRenderToken) {
-      destroyChart(state.priceChart);
-      state.priceChart = null;
-      return;
-    }
-
-    state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
-
-    attachChartInteractions(state.priceChart);
-    attachChartInteractions(state.indicatorChart);
-    focusInitialHover();
-  } catch (error) {
-    console.error(error);
-    destroyCanvasChart("priceChart");
-    destroyCanvasChart("indicatorChart");
-    if (renderToken !== state.chartRenderToken) return;
-    try {
-      renderPriceChartFallback(chart, renderToken);
-      if (renderToken !== state.chartRenderToken) return;
-      const indicatorCtx = releaseCanvas("indicatorChart");
-      if (!indicatorCtx) return;
-      state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
-      attachChartInteractions(state.indicatorChart);
-      hideChartMessage("priceChartEmpty");
-      setStatus(`蜡烛图插件异常，已显示收盘价折线图（${error.message}）`, true);
-    } catch (fallbackError) {
-      destroyCanvasChart("priceChart");
-      destroyCanvasChart("indicatorChart");
-      showChartMessage("priceChartEmpty", `K 线加载失败：${error.message}`);
-      showChartMessage("indicatorChartEmpty", `副图加载失败：${fallbackError.message}`);
-      setCanvasVisible("priceChart", false);
-      setCanvasVisible("indicatorChart", false);
-    }
-  }
-}
-
-function renderPriceChartFallback(chart, renderToken = state.chartRenderToken) {
-  destroyCanvasChart("priceChart");
-  if (renderToken !== state.chartRenderToken) return;
   const priceCtx = releaseCanvas("priceChart");
-  if (!priceCtx) return;
-  state.priceChart = new Chart(priceCtx, {
-    type: "line",
-    data: {
-      labels: chart.dates,
-      datasets: [
-        buildLineDataset("收盘价", chart.close, chartColors.close),
-        buildLineDataset("MA5", chart.ma5, chartColors.ma5),
-        buildLineDataset("MA20", chart.ma20, chartColors.ma20),
-      ],
-    },
-    options: buildPriceChartOptions(),
-  });
+  if (!priceCtx || renderToken !== state.chartRenderToken) return;
+
+  state.priceChart = createPriceChart(priceCtx, chart);
+
+  const indicatorCtx = releaseCanvas("indicatorChart");
+  if (!indicatorCtx || renderToken !== state.chartRenderToken) {
+    destroyChart(state.priceChart);
+    state.priceChart = null;
+    return;
+  }
+
+  state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
+
   attachChartInteractions(state.priceChart);
-  setCanvasVisible("priceChart", true);
+  attachChartInteractions(state.indicatorChart);
+  focusInitialHover();
 }
 
 function buildIndicatorConfig(chart, type) {
@@ -1282,24 +1280,12 @@ function rerenderPriceChart() {
   if (!state.chartData) return;
   const renderToken = ++state.chartRenderToken;
   destroyCanvasChart("priceChart");
-  try {
-    const priceCtx = releaseCanvas("priceChart");
-    if (!priceCtx || renderToken !== state.chartRenderToken) return;
-    state.priceChart = new Chart(priceCtx, {
-      type: "candlestick",
-      data: {
-        labels: state.chartData.dates,
-        datasets: buildPriceDatasets(state.chartData),
-      },
-      options: buildPriceChartOptions(),
-    });
-    attachChartInteractions(state.priceChart);
-    hideChartMessage("priceChartEmpty");
-    setCanvasVisible("priceChart", true);
-  } catch (error) {
-    renderPriceChartFallback(state.chartData, renderToken);
-    setStatus(`蜡烛图加载失败，已回退为折线图。(${error.message})`, true);
-  }
+  const priceCtx = releaseCanvas("priceChart");
+  if (!priceCtx || renderToken !== state.chartRenderToken) return;
+  state.priceChart = createPriceChart(priceCtx, state.chartData);
+  attachChartInteractions(state.priceChart);
+  hideChartMessage("priceChartEmpty");
+  setCanvasVisible("priceChart", true);
   if (state.hoverIndex != null) {
     syncActiveElements(state.hoverIndex);
     state.priceChart?.update("none");
