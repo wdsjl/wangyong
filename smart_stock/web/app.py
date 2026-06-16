@@ -11,9 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from smart_stock.service import (
     backtest_stock,
     batch_analyze,
+    check_live_data_available,
     compare_stocks,
     detail_to_dict,
     get_stock_detail,
+    is_akshare_installed,
     search_stocks,
     stock_insight,
 )
@@ -34,8 +36,14 @@ def create_app(demo: bool = False) -> FastAPI:
         return FileResponse(STATIC_DIR / "index.html")
 
     @app.get("/api/config")
-    async def get_config() -> dict[str, bool]:
-        return {"demo": app.state.demo}
+    async def get_config() -> dict:
+        akshare_installed = is_akshare_installed()
+        live_ok = app.state.demo or (akshare_installed and check_live_data_available())
+        return {
+            "demo": app.state.demo,
+            "akshare_installed": akshare_installed,
+            "live_data_ok": live_ok,
+        }
 
     @app.get("/api/search")
     async def api_search(
@@ -54,12 +62,18 @@ def create_app(demo: bool = False) -> FastAPI:
         demo: bool | None = None,
     ) -> dict:
         use_demo = app.state.demo if demo is None else demo
+        allow_fallback = not use_demo
         try:
-            detail = get_stock_detail(code, days=days, demo=use_demo)
+            detail = get_stock_detail(
+                code,
+                days=days,
+                demo=use_demo,
+                allow_fallback=allow_fallback,
+            )
         except Exception as exc:  # noqa: BLE001 - 统一转换为 HTTP 错误
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         payload = detail_to_dict(detail)
-        payload["demo"] = use_demo
+        payload["demo"] = use_demo or detail.data_source != "live"
         return payload
 
     @app.get("/api/batch")
@@ -69,10 +83,11 @@ def create_app(demo: bool = False) -> FastAPI:
         demo: bool | None = None,
     ) -> dict:
         use_demo = app.state.demo if demo is None else demo
+        allow_fallback = not use_demo
         code_list = [item.strip() for item in codes.split(",") if item.strip()]
         if not code_list:
             raise HTTPException(status_code=400, detail="请至少提供一个股票代码")
-        items = batch_analyze(code_list, days=days, demo=use_demo)
+        items = batch_analyze(code_list, days=days, demo=use_demo, allow_fallback=allow_fallback)
         return {"items": items, "demo": use_demo}
 
     @app.get("/api/compare")
@@ -82,10 +97,11 @@ def create_app(demo: bool = False) -> FastAPI:
         demo: bool | None = None,
     ) -> dict:
         use_demo = app.state.demo if demo is None else demo
+        allow_fallback = not use_demo
         code_list = [item.strip() for item in codes.split(",") if item.strip()]
         if len(code_list) < 2:
             raise HTTPException(status_code=400, detail="请至少提供两只股票进行对比")
-        series = compare_stocks(code_list, days=days, demo=use_demo)
+        series = compare_stocks(code_list, days=days, demo=use_demo, allow_fallback=allow_fallback)
         if len(series) < 2:
             raise HTTPException(status_code=400, detail="有效股票不足，无法生成对比图")
         return {"series": series, "demo": use_demo}

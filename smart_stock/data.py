@@ -103,3 +103,23 @@ def fetch_daily_bars(code: str, days: int = 180, demo: bool = False) -> pd.DataF
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df.sort_values("date").tail(days).reset_index(drop=True)
+
+
+def fetch_daily_bars_safe(
+    code: str,
+    days: int = 180,
+    demo: bool = False,
+    allow_fallback: bool = False,
+) -> tuple[pd.DataFrame, str]:
+    """获取行情，必要时回退到演示数据。
+
+    返回 (dataframe, data_source)，data_source 为 live / demo / demo_fallback。
+    """
+    if demo:
+        return generate_demo_bars(code, days=days), "demo"
+    try:
+        return fetch_daily_bars(code, days=days, demo=False), "live"
+    except Exception:
+        if allow_fallback:
+            return generate_demo_bars(code, days=days), "demo_fallback"
+        raise

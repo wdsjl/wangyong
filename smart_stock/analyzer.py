@@ -8,7 +8,7 @@ from smart_stock.config import (
     IndicatorConfig,
     StrategyConfig,
 )
-from smart_stock.data import fetch_daily_bars, get_stock_name, normalize_code, search_stock
+from smart_stock.data import DataFetchError, fetch_daily_bars_safe, get_stock_name, normalize_code, search_stock
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import AnalysisResult, Signal
 from smart_stock.strategy import generate_signal
@@ -18,6 +18,7 @@ def analyze_stock(
     code: str,
     days: int | None = None,
     demo: bool = False,
+    allow_fallback: bool = False,
     indicator_config: IndicatorConfig = DEFAULT_INDICATOR_CONFIG,
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
 ) -> AnalysisResult:
@@ -25,7 +26,13 @@ def analyze_stock(
     normalized_code = normalize_code(code)
     lookback_days = days or strategy_config.lookback_days
 
-    bars = fetch_daily_bars(normalized_code, days=lookback_days, demo=demo)
+    bars, data_source = fetch_daily_bars_safe(
+        normalized_code,
+        days=lookback_days,
+        demo=demo,
+        allow_fallback=allow_fallback,
+    )
+    use_demo_names = demo or data_source != "live"
     enriched = enrich_indicators(bars, indicator_config)
     indicators = latest_indicator_snapshot(enriched)
     signal, score, reasons = generate_signal(enriched, indicators, strategy_config)
@@ -33,7 +40,7 @@ def analyze_stock(
     latest = enriched.iloc[-1]
     result = AnalysisResult(
         code=normalized_code,
-        name=get_stock_name(normalized_code, demo=demo),
+        name=get_stock_name(normalized_code, demo=use_demo_names),
         latest_price=float(latest["close"]),
         latest_date=latest["date"].strftime("%Y-%m-%d"),
         signal=signal,
@@ -41,17 +48,29 @@ def analyze_stock(
         reasons=reasons,
         indicators=indicators,
     )
-    if demo:
+    if data_source == "demo":
         result.reasons.insert(0, "【演示模式】价格为本地模拟数据，非真实行情；要看实盘请去掉 --demo")
+    elif data_source == "demo_fallback":
+        result.reasons.insert(
+            0,
+            "【自动回退】实盘行情拉取失败，已改用演示数据。请安装 akshare 并检查网络：pip install akshare -i https://pypi.org/simple",
+        )
     return result
 
 
-def analyze_many(codes: list[str], days: int | None = None, demo: bool = False) -> list[AnalysisResult]:
+def analyze_many(
+    codes: list[str],
+    days: int | None = None,
+    demo: bool = False,
+    allow_fallback: bool = False,
+) -> list[AnalysisResult]:
     """批量分析多只股票。"""
     results: list[AnalysisResult] = []
     for code in codes:
         try:
-            results.append(analyze_stock(code, days=days, demo=demo))
+            results.append(
+                analyze_stock(code, days=days, demo=demo, allow_fallback=allow_fallback)
+            )
         except Exception as exc:  # noqa: BLE001 - 批量分析需要跳过失败项
             results.append(
                 AnalysisResult(

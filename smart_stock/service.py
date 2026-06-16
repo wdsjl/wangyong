@@ -11,7 +11,7 @@ from smart_stock.config import (
     IndicatorConfig,
     StrategyConfig,
 )
-from smart_stock.data import fetch_daily_bars, get_stock_name, normalize_code, search_stock
+from smart_stock.data import DataFetchError, fetch_daily_bars_safe, get_stock_name, normalize_code, search_stock
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import AnalysisResult
 from smart_stock.backtest import BacktestConfig, run_backtest
@@ -24,12 +24,14 @@ from smart_stock.strategy import generate_signal
 class StockDetail:
     analysis: AnalysisResult
     chart: dict
+    data_source: str = "live"
 
 
 def get_stock_detail(
     code: str,
     days: int | None = None,
     demo: bool = False,
+    allow_fallback: bool = False,
     indicator_config: IndicatorConfig = DEFAULT_INDICATOR_CONFIG,
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
 ) -> StockDetail:
@@ -37,7 +39,13 @@ def get_stock_detail(
     normalized_code = normalize_code(code)
     lookback_days = days or strategy_config.lookback_days
 
-    bars = fetch_daily_bars(normalized_code, days=lookback_days, demo=demo)
+    bars, data_source = fetch_daily_bars_safe(
+        normalized_code,
+        days=lookback_days,
+        demo=demo,
+        allow_fallback=allow_fallback,
+    )
+    use_demo_names = demo or data_source != "live"
     enriched = enrich_indicators(bars, indicator_config)
     indicators = latest_indicator_snapshot(enriched)
     signal, score, reasons = generate_signal(enriched, indicators, strategy_config)
@@ -45,7 +53,7 @@ def get_stock_detail(
     latest = enriched.iloc[-1]
     analysis = AnalysisResult(
         code=normalized_code,
-        name=get_stock_name(normalized_code, demo=demo),
+        name=get_stock_name(normalized_code, demo=use_demo_names),
         latest_price=float(latest["close"]),
         latest_date=latest["date"].strftime("%Y-%m-%d"),
         signal=signal,
@@ -53,10 +61,15 @@ def get_stock_detail(
         reasons=reasons,
         indicators=indicators,
     )
-    if demo:
+    if data_source == "demo":
         analysis.reasons.insert(0, "【演示模式】价格为本地模拟数据，非真实行情；要看实盘请去掉 --demo")
+    elif data_source == "demo_fallback":
+        analysis.reasons.insert(
+            0,
+            "【自动回退】实盘行情拉取失败，已改用演示数据。请安装 akshare 并检查网络：pip install akshare -i https://pypi.org/simple",
+        )
 
-    return StockDetail(analysis=analysis, chart=dataframe_to_chart(enriched))
+    return StockDetail(analysis=analysis, chart=dataframe_to_chart(enriched), data_source=data_source)
 
 
 def search_stocks(keyword: str, limit: int = 10, demo: bool = False) -> list[dict[str, str]]:
@@ -64,13 +77,23 @@ def search_stocks(keyword: str, limit: int = 10, demo: bool = False) -> list[dic
     return [{"code": str(row["代码"]), "name": str(row["名称"])} for _, row in df.iterrows()]
 
 
-def batch_analyze(codes: list[str], days: int | None = None, demo: bool = False) -> list[dict]:
-    results = analyze_many(codes, days=days, demo=demo)
+def batch_analyze(
+    codes: list[str],
+    days: int | None = None,
+    demo: bool = False,
+    allow_fallback: bool = False,
+) -> list[dict]:
+    results = analyze_many(codes, days=days, demo=demo, allow_fallback=allow_fallback)
     payload = [analysis_to_dict(result) for result in results]
     return sorted(payload, key=lambda item: item["score"], reverse=True)
 
 
-def compare_stocks(codes: list[str], days: int = 120, demo: bool = False) -> list[dict]:
+def compare_stocks(
+    codes: list[str],
+    days: int = 120,
+    demo: bool = False,
+    allow_fallback: bool = False,
+) -> list[dict]:
     """对比多只股票区间涨跌幅（归一化起点为 100）。"""
     series_list: list[dict] = []
     lookback_days = max(days, 30)
@@ -80,7 +103,12 @@ def compare_stocks(codes: list[str], days: int = 120, demo: bool = False) -> lis
         if not normalized_code:
             continue
         try:
-            bars = fetch_daily_bars(normalized_code, days=lookback_days, demo=demo)
+            bars, data_source = fetch_daily_bars_safe(
+                normalized_code,
+                days=lookback_days,
+                demo=demo,
+                allow_fallback=allow_fallback,
+            )
             if bars.empty:
                 continue
             base_price = float(bars.iloc[0]["close"])
@@ -88,13 +116,15 @@ def compare_stocks(codes: list[str], days: int = 120, demo: bool = False) -> lis
                 continue
             normalized = (bars["close"] / base_price * 100).round(4)
             latest_price = float(bars.iloc[-1]["close"])
+            use_demo_names = demo or data_source != "live"
             series_list.append(
                 {
                     "code": normalized_code,
-                    "name": get_stock_name(normalized_code, demo=demo),
+                    "name": get_stock_name(normalized_code, demo=use_demo_names),
                     "dates": [item.strftime("%Y-%m-%d") for item in bars["date"]],
                     "values": normalized.tolist(),
                     "return_pct": round((latest_price / base_price - 1) * 100, 2),
+                    "data_source": data_source,
                 }
             )
         except Exception:
@@ -126,4 +156,25 @@ def detail_to_dict(detail: StockDetail) -> dict:
     return {
         "analysis": analysis_to_dict(detail.analysis),
         "chart": detail.chart,
+        "data_source": detail.data_source,
+        "demo_fallback": detail.data_source == "demo_fallback",
     }
+
+
+def check_live_data_available() -> bool:
+    """探测能否拉取一只样本股的实盘日线。"""
+    try:
+        fetch_daily_bars_safe("600519", days=30, demo=False, allow_fallback=False)
+    except DataFetchError:
+        return False
+    except Exception:
+        return False
+    return True
+
+
+def is_akshare_installed() -> bool:
+    try:
+        import akshare  # noqa: F401
+    except ImportError:
+        return False
+    return True

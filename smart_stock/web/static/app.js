@@ -1169,7 +1169,15 @@ function renderInsight(payload) {
 async function loadConfig() {
   const config = await api("/api/config");
   state.demo = config.demo;
-  elements.modeBadge.textContent = config.demo ? "演示模式" : "实时行情模式";
+  if (config.demo) {
+    elements.modeBadge.textContent = "演示模式";
+  } else if (!config.akshare_installed) {
+    elements.modeBadge.textContent = "实盘不可用：未安装 akshare";
+  } else if (!config.live_data_ok) {
+    elements.modeBadge.textContent = "实盘拉取失败：已可自动回退演示";
+  } else {
+    elements.modeBadge.textContent = "实时行情模式";
+  }
 }
 
 async function searchStocks() {
@@ -1198,7 +1206,12 @@ async function loadAnalysis() {
   try {
     const payload = await api(`/api/analyze/${encodeURIComponent(code)}?days=${days}`);
     renderAnalysis(payload);
-    setStatus(`分析完成：${payload.analysis.name}`);
+    const sourceHint = payload.demo_fallback
+      ? "（实盘失败，已自动使用演示数据）"
+      : payload.data_source === "live"
+        ? "（实盘数据）"
+        : "";
+    setStatus(`分析完成：${payload.analysis.name}${sourceHint}`);
   } catch (error) {
     setStatus(error.message, true);
   }
