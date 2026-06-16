@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from smart_stock.config import StrategyConfig, DEFAULT_STRATEGY_CONFIG
+from smart_stock.config import DEFAULT_STRATEGY_CONFIG, StrategyConfig
+from smart_stock.indicators import latest_indicator_snapshot
 from smart_stock.models import IndicatorSnapshot, Signal
 
 
@@ -164,3 +165,48 @@ def generate_signal(
         reasons.append("多空因素交织，建议继续观望")
 
     return signal, round(total_score, 3), reasons
+
+
+def compute_trade_markers(
+    enriched: pd.DataFrame,
+    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    warmup_days: int = 60,
+) -> dict[str, list[dict[str, float | str]]]:
+    """根据策略信号生成 K 线买卖点标记（信号由观望转为买入/卖出时触发）。"""
+    buy_markers: list[dict[str, float | str]] = []
+    sell_markers: list[dict[str, float | str]] = []
+
+    if len(enriched) <= warmup_days:
+        return {"buy_markers": buy_markers, "sell_markers": sell_markers}
+
+    prev_signal: Signal | None = None
+    buy_set = {Signal.BUY, Signal.STRONG_BUY}
+    sell_set = {Signal.SELL, Signal.STRONG_SELL}
+
+    for index in range(warmup_days, len(enriched)):
+        window = enriched.iloc[: index + 1]
+        row = enriched.iloc[index]
+        indicators = latest_indicator_snapshot(window)
+        signal, score, _ = generate_signal(window, indicators, strategy_config)
+
+        if signal in buy_set and (prev_signal is None or prev_signal not in buy_set):
+            buy_markers.append(
+                {
+                    "date": row["date"].strftime("%Y-%m-%d"),
+                    "price": round(float(row["close"]), 2),
+                    "signal": signal.value,
+                    "score": round(score, 3),
+                }
+            )
+        elif signal in sell_set and (prev_signal is None or prev_signal not in sell_set):
+            sell_markers.append(
+                {
+                    "date": row["date"].strftime("%Y-%m-%d"),
+                    "price": round(float(row["close"]), 2),
+                    "signal": signal.value,
+                    "score": round(score, 3),
+                }
+            )
+        prev_signal = signal
+
+    return {"buy_markers": buy_markers, "sell_markers": sell_markers}

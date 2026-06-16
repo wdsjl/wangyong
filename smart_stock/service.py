@@ -24,7 +24,7 @@ from smart_stock.models import AnalysisResult
 from smart_stock.backtest import BacktestConfig, run_backtest
 from smart_stock.llm_insight import generate_insight
 from smart_stock.serializers import analysis_to_dict, backtest_to_dict, dataframe_to_chart
-from smart_stock.strategy import generate_signal
+from smart_stock.strategy import compute_trade_markers, generate_signal
 
 
 @dataclass
@@ -77,7 +77,11 @@ def get_stock_detail(
         )
 
     analysis = attach_live_spot_price(analysis, normalized_code, data_source)
-    return StockDetail(analysis=analysis, chart=dataframe_to_chart(enriched), data_source=data_source)
+    chart = dataframe_to_chart(enriched)
+    markers = compute_trade_markers(enriched)
+    chart["buy_markers"] = markers["buy_markers"]
+    chart["sell_markers"] = markers["sell_markers"]
+    return StockDetail(analysis=analysis, chart=chart, data_source=data_source)
 
 
 def search_stocks(keyword: str, limit: int = 10, demo: bool = False) -> list[dict[str, str]]:

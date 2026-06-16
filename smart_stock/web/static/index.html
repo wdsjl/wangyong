@@ -102,9 +102,11 @@
               </div>
               <div class="watch-actions">
                 <button class="secondary small add-current-watch-btn" id="addCurrentWatchBtn" type="button">加入当前股</button>
+                <button class="secondary small" id="keepOnlyCurrentBtn" type="button">仅保留当前股</button>
                 <button id="batchBtn" type="button">批量分析</button>
-                <button class="secondary small" id="clearWatchBtn" type="button">清空</button>
+                <button class="secondary small" id="clearWatchBtn" type="button">清空自选</button>
               </div>
+              <p class="watch-note">点击代码旁 × 可删除；修改后会自动保存到浏览器本地</p>
               <div class="monitor-controls">
                 <label class="toggle">
                   <input id="monitorToggle" type="checkbox" checked />
@@ -124,7 +126,6 @@
               <div class="alert-panel" id="alertPanel">
                 <div class="empty">暂无信号变化告警</div>
               </div>
-              <p class="watch-note">自选股会自动保存到浏览器本地</p>
               <div class="watchlist" id="watchlist">
                 <div class="empty">点击批量分析查看结果</div>
               </div>
@@ -136,9 +137,13 @@
               <div class="chart-toolbar">
                 <div>
                   <h3>K 线与均线</h3>
-                  <p class="chart-hint">滚轮缩放 · 拖拽平移 · 鼠标悬停联动 · ← → 逐根切换 · 均线见左侧指标</p>
+                  <p class="chart-hint">滚轮缩放 · 拖拽平移 · ← → 切换 · 绿色▲买入 红色▼卖出</p>
                 </div>
                 <div class="chart-controls">
+                  <label class="toggle">
+                    <input id="showTradeMarkersToggle" type="checkbox" checked />
+                    <span>买卖点</span>
+                  </label>
                   <label class="toggle">
                     <input id="showBollToggle" type="checkbox" />
                     <span>叠加布林带</span>

@@ -5,7 +5,7 @@ import pandas as pd
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import Signal
 from smart_stock.sample_data import generate_demo_bars, search_demo_stocks
-from smart_stock.strategy import generate_signal
+from smart_stock.strategy import compute_trade_markers, generate_signal
 
 
 def test_demo_search():
@@ -35,6 +35,16 @@ def test_signal_generation():
     assert isinstance(score, float)
     assert isinstance(reasons, list)
     assert len(enriched) == 120
+
+
+def test_compute_trade_markers():
+    bars = generate_demo_bars("000815", days=120)
+    enriched = enrich_indicators(bars)
+    markers = compute_trade_markers(enriched, warmup_days=30)
+    assert "buy_markers" in markers
+    assert "sell_markers" in markers
+    assert isinstance(markers["buy_markers"], list)
+    assert isinstance(markers["sell_markers"], list)
 
 
 def test_analyze_stock_demo():

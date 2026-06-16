@@ -39,6 +39,8 @@ def test_api_analyze_demo():
     for field in ("open", "high", "low", "close"):
         assert field in payload["chart"]
         assert len(payload["chart"][field]) == 120
+    assert "buy_markers" in payload["chart"]
+    assert "sell_markers" in payload["chart"]
 
 
 def test_api_batch_demo():

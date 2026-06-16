@@ -4,6 +4,7 @@ const state = {
   chartData: null,
   activeIndicator: "macd",
   showBollinger: false,
+  showTradeMarkers: true,
   hoverIndex: null,
   zoomRange: null,
   keyboardNavEnabled: true,
@@ -59,6 +60,8 @@ const elements = {
   insightContent: document.getElementById("insightContent"),
   insightPanel: document.getElementById("insightPanel"),
   showBollToggle: document.getElementById("showBollToggle"),
+  keepOnlyCurrentBtn: document.getElementById("keepOnlyCurrentBtn"),
+  showTradeMarkersToggle: document.getElementById("showTradeMarkersToggle"),
   resetZoomBtn: document.getElementById("resetZoomBtn"),
   crosshairInfo: document.getElementById("crosshairInfo"),
   priceChartEmpty: document.getElementById("priceChartEmpty"),
@@ -76,7 +79,7 @@ const signalClassMap = {
 const WATCHLIST_STORAGE_KEY = "smart_stock_watchlist";
 const SIGNAL_SNAPSHOT_KEY = "smart_stock_signal_snapshot";
 const MONITOR_SETTINGS_KEY = "smart_stock_monitor_settings";
-const DEFAULT_WATCHLIST = ["600519", "000001", "000815", "300750"];
+const DEFAULT_WATCHLIST = ["000815"];
 
 const COMPARE_COLORS = ["#38bdf8", "#f472b6", "#fbbf24", "#34d399", "#c084fc", "#fb7185", "#22d3ee", "#f97316"];
 
@@ -126,7 +129,56 @@ const crosshairPlugin = {
   },
 };
 
-Chart.register(crosshairPlugin);
+const tradeMarkerPlugin = {
+  id: "tradeMarkers",
+  afterDatasetsDraw(chart) {
+    if (!state.showTradeMarkers || !state.chartData || chart.canvas.id !== "priceChart") {
+      return;
+    }
+    const buyMarkers = state.chartData.buy_markers || [];
+    const sellMarkers = state.chartData.sell_markers || [];
+    if (!buyMarkers.length && !sellMarkers.length) return;
+
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    if (!xScale || !yScale) return;
+
+    const ctx = chart.ctx;
+    const dateIndex = new Map(state.chartData.dates.map((date, index) => [date, index]));
+
+    const drawMarker = (marker, color, direction) => {
+      const index = dateIndex.get(marker.date);
+      if (index == null) return;
+      const x = xScale.getPixelForValue(index);
+      const y = yScale.getPixelForValue(marker.price);
+      const size = 7;
+      const offset = direction === "buy" ? size + 4 : -(size + 4);
+      const tipY = y + offset;
+      const baseY = tipY + (direction === "buy" ? -size * 1.6 : size * 1.6);
+
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (direction === "buy") {
+        ctx.moveTo(x, tipY);
+        ctx.lineTo(x - size, baseY);
+        ctx.lineTo(x + size, baseY);
+      } else {
+        ctx.moveTo(x, tipY);
+        ctx.lineTo(x - size, baseY);
+        ctx.lineTo(x + size, baseY);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    };
+
+    buyMarkers.forEach((marker) => drawMarker(marker, "#22c55e", "buy"));
+    sellMarkers.forEach((marker) => drawMarker(marker, "#ef4444", "sell"));
+  },
+};
+
+Chart.register(crosshairPlugin, tradeMarkerPlugin);
 
 function initChartEnvironment() {
   if (typeof Chart === "undefined") {
@@ -190,11 +242,14 @@ function parseWatchInput(value) {
 function loadWatchlistFromStorage() {
   try {
     const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_WATCHLIST];
+    if (raw === null) {
+      return [...DEFAULT_WATCHLIST];
+    }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [...DEFAULT_WATCHLIST];
-    const codes = [...new Set(parsed.map(normalizeWatchCode).filter(Boolean))];
-    return codes.length ? codes : [...DEFAULT_WATCHLIST];
+    if (!Array.isArray(parsed)) {
+      return [...DEFAULT_WATCHLIST];
+    }
+    return [...new Set(parsed.map(normalizeWatchCode).filter(Boolean))];
   } catch {
     return [...DEFAULT_WATCHLIST];
   }
@@ -228,6 +283,22 @@ function removeFromWatchlist(code) {
 
 function clearWatchlist() {
   setWatchlistCodes([]);
+  elements.watchlist.innerHTML = '<div class="empty">自选股已清空，可添加新股票</div>';
+  elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化告警</div>';
+  destroyChart(state.compareChart);
+  state.compareChart = null;
+  setStatus("已清空自选股");
+}
+
+function keepOnlyCurrentWatchlist() {
+  const code = normalizeWatchCode(state.currentCode || elements.searchInput.value);
+  if (!code) {
+    setStatus("请先选择要保留的股票", true);
+    return;
+  }
+  setWatchlistCodes([code]);
+  elements.watchlist.innerHTML = '<div class="empty">点击批量分析查看结果</div>';
+  setStatus(`自选股已仅保留 ${code}`);
 }
 
 function initWatchlist() {
@@ -650,11 +721,24 @@ function renderWatchlist(items) {
             <strong>${item.name}</strong>
             <div class="meta">${item.code} · ${formatPrice(item.latest_price)}</div>
           </div>
-          <div class="signal-pill ${signalClassMap[item.signal.key] || "hold"}">${item.signal.value}</div>
+          <div class="watch-item-actions">
+            <div class="signal-pill ${signalClassMap[item.signal.key] || "hold"}">${item.signal.value}</div>
+            <button type="button" class="icon-btn watch-remove-btn" data-code="${item.code}" title="从自选删除">×</button>
+          </div>
         </div>
       `
     )
     .join("");
+
+  elements.watchlist.querySelectorAll(".watch-remove-btn").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const code = button.dataset.code;
+      removeFromWatchlist(code);
+      setStatus(`已从自选移除 ${code}`);
+      refreshWatchlist({ silent: true, withCompare: false });
+    });
+  });
 
   elements.watchlist.querySelectorAll(".watch-item").forEach((node) => {
     node.addEventListener("click", () => {
@@ -1471,11 +1555,8 @@ function bindEvents() {
   });
   elements.clearWatchBtn.addEventListener("click", () => {
     clearWatchlist();
-    elements.watchlist.innerHTML = '<div class="empty">点击批量分析查看结果</div>';
-    elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化告警</div>';
-    destroyChart(state.compareChart);
-    setStatus("已清空自选股");
   });
+  elements.keepOnlyCurrentBtn.addEventListener("click", keepOnlyCurrentWatchlist);
   elements.monitorNowBtn.addEventListener("click", () => {
     refreshWatchlist({ detectChanges: true, withCompare: true });
   });
@@ -1520,6 +1601,13 @@ function bindEvents() {
     }
     rerenderPriceChart();
   });
+  if (elements.showTradeMarkersToggle) {
+    elements.showTradeMarkersToggle.addEventListener("change", (event) => {
+      state.showTradeMarkers = event.target.checked;
+      state.priceChart?.update("none");
+      setStatus(state.showTradeMarkers ? "已显示策略买卖点" : "已隐藏买卖点");
+    });
+  }
   elements.searchInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchStocks();
   });
