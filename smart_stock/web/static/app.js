@@ -75,6 +75,12 @@ const elements = {
   mainFlowText: document.getElementById("mainFlowText"),
   obvTrendText: document.getElementById("obvTrendText"),
   inlineAlerts: document.getElementById("inlineAlerts"),
+  adxText: document.getElementById("adxText"),
+  trendRegimeText: document.getElementById("trendRegimeText"),
+  momentumResonanceText: document.getElementById("momentumResonanceText"),
+  chipText: document.getElementById("chipText"),
+  valuationText: document.getElementById("valuationText"),
+  northboundText: document.getElementById("northboundText"),
 };
 
 const signalClassMap = {
@@ -112,6 +118,9 @@ const chartColors = {
   rsi: "#c084fc",
   volume: "#64748b",
   obv: "#38bdf8",
+  kdjK: "#f472b6",
+  kdjD: "#a78bfa",
+  kdjJ: "#fbbf24",
   crosshair: "rgba(148, 163, 184, 0.55)",
 };
 
@@ -555,18 +564,27 @@ function detectSignalChanges(items, previous) {
 }
 
 function collectResonanceAlerts(items) {
-  return items
+  const alerts = items
     .filter((item) => item.monitoring?.resonance_level === "strong")
     .map((item) => ({
       code: item.code,
       name: item.name,
-      side: item.monitoring.resonance_side,
-      hits: item.monitoring.resonance_hits || [],
       message:
         item.monitoring.resonance_side === "bullish"
           ? `强势共振看多：${(item.monitoring.resonance_hits || []).slice(0, 3).join("、")}`
           : `强势共振看空：${(item.monitoring.resonance_hits || []).slice(0, 3).join("、")}`,
     }));
+
+  items.forEach((item) => {
+    if (item.monitoring?.momentum_resonance && item.monitoring.momentum_resonance !== "无") {
+      alerts.push({
+        code: item.code,
+        name: item.name,
+        message: `动量共振：${item.monitoring.momentum_resonance}`,
+      });
+    }
+  });
+  return alerts;
 }
 
 function renderAlerts(alerts, resonanceAlerts = []) {
@@ -901,6 +919,29 @@ function renderMonitoringPanel(monitoring) {
   const flow = monitoring.money_flow || {};
   elements.mainFlowText.textContent = formatFlow(flow.main_net_inflow);
   elements.obvTrendText.textContent = `OBV ${monitoring.obv_trend || "flat"}`;
+  elements.adxText.textContent = monitoring.adx == null ? "--" : Number(monitoring.adx).toFixed(1);
+  elements.trendRegimeText.textContent = monitoring.trend_regime || "--";
+  elements.momentumResonanceText.textContent = monitoring.momentum_resonance || "无";
+
+  const chip = monitoring.chip || {};
+  elements.chipText.textContent = chip.avg_cost
+    ? `成本${formatPrice(chip.avg_cost)} · 获利${chip.profit_ratio ?? "-"}%`
+    : "筹码暂无";
+
+  const fundamentals = monitoring.fundamentals || {};
+  elements.valuationText.textContent =
+    fundamentals.pe_ttm != null
+      ? `PE ${Number(fundamentals.pe_ttm).toFixed(1)} · ${fundamentals.valuation_label || ""}`
+      : "--";
+
+  const northbound = monitoring.northbound || {};
+  if (!northbound.eligible) {
+    elements.northboundText.textContent = "非沪深港通标的";
+  } else if (northbound.net_inflow_today != null) {
+    elements.northboundText.textContent = `北向 ${formatFlow(northbound.net_inflow_today)}`;
+  } else {
+    elements.northboundText.textContent = "北向数据暂无";
+  }
 
   const alerts = monitoring.alerts || [];
   if (!alerts.length) {
@@ -952,6 +993,11 @@ function renderAnalysis(payload) {
     ["ATR", indicators.atr],
     ["OBV", indicators.obv],
     ["量比", indicators.volume_ratio],
+    ["KDJ K", indicators.kdj_k],
+    ["CCI", indicators.cci],
+    ["WR", indicators.wr],
+    ["MFI", indicators.mfi],
+    ["ADX", indicators.adx],
     ["MACD", indicators.macd],
     ["MACD 柱", indicators.macd_hist],
   ];
@@ -1462,6 +1508,30 @@ function buildIndicatorConfig(chart, type) {
         datasets: [buildLineDataset("OBV", chart.obv, chartColors.obv)],
       },
       options: baseChartOptions(),
+    };
+  }
+
+  if (type === "kdj") {
+    return {
+      type: "line",
+      data: {
+        labels: chart.dates,
+        datasets: [
+          buildLineDataset("K", chart.kdj_k, chartColors.kdjK),
+          buildLineDataset("D", chart.kdj_d, chartColors.kdjD),
+          buildLineDataset("J", chart.kdj_j, chartColors.kdjJ),
+        ],
+      },
+      options: baseChartOptions({
+        scales: {
+          y: {
+            min: 0,
+            max: 100,
+            ticks: { color: "#94a3b8", stepSize: 20 },
+            grid: { color: "rgba(148, 163, 184, 0.08)" },
+          },
+        },
+      }),
     };
   }
 

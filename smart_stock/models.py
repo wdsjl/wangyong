@@ -32,6 +32,42 @@ class IndicatorSnapshot:
     vma5: float | None = None
     vma20: float | None = None
     volume_ratio: float | None = None
+    kdj_k: float | None = None
+    kdj_d: float | None = None
+    kdj_j: float | None = None
+    cci: float | None = None
+    wr: float | None = None
+    mfi: float | None = None
+    adx: float | None = None
+    plus_di: float | None = None
+    minus_di: float | None = None
+
+
+@dataclass
+class ChipSnapshot:
+    avg_cost: float | None = None
+    profit_ratio: float | None = None
+    trapped_ratio: float | None = None
+    support_price: float | None = None
+    pressure_price: float | None = None
+    peak_price: float | None = None
+
+
+@dataclass
+class FundamentalSnapshot:
+    pe_ttm: float | None = None
+    pb: float | None = None
+    roe: float | None = None
+    valuation_label: str = "未知"
+    source: str = "unavailable"
+
+
+@dataclass
+class NorthboundSnapshot:
+    eligible: bool = False
+    net_inflow_today: float | None = None
+    holding_ratio: float | None = None
+    source: str = "unavailable"
 
 
 @dataclass
@@ -58,6 +94,12 @@ class MonitoringSnapshot:
     obv_trend: str = "flat"
     volume_signal: str = "量能平稳"
     boll_position: str = "中轨附近"
+    adx: float | None = None
+    trend_regime: str = "未知"
+    momentum_resonance: str = "无"
+    chip: ChipSnapshot | None = None
+    fundamentals: FundamentalSnapshot | None = None
+    northbound: NorthboundSnapshot | None = None
     alerts: list[dict[str, str]] = field(default_factory=list)
     money_flow: MoneyFlowSnapshot | None = None
 

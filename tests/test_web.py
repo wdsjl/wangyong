@@ -61,6 +61,8 @@ def test_api_analyze_demo(client):
     assert "monitoring" in payload["analysis"]
     assert "obv" in payload["chart"]
     assert "atr" in payload["chart"]
+    assert "kdj_k" in payload["chart"]
+    assert payload["analysis"]["monitoring"].get("chip")
 
 
 def test_api_batch_demo(client):

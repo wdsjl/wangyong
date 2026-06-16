@@ -10,7 +10,14 @@ from smart_stock.config import (
     ResonanceConfig,
     StrategyConfig,
 )
-from smart_stock.models import IndicatorSnapshot, MoneyFlowSnapshot, MonitoringSnapshot
+from smart_stock.models import (
+    ChipSnapshot,
+    FundamentalSnapshot,
+    IndicatorSnapshot,
+    MoneyFlowSnapshot,
+    MonitoringSnapshot,
+    NorthboundSnapshot,
+)
 
 
 def compute_trend_score(price: float, indicators: IndicatorSnapshot) -> tuple[int, str]:
@@ -183,6 +190,33 @@ def compute_resonance(
     if obv == "down" and price <= (indicators.ma20 or price):
         bearish_hits.append("OBV资金流出")
 
+    if indicators.kdj_k is not None and indicators.kdj_k < config.kdj_oversold:
+        bullish_hits.append(f"KDJ超卖(K={indicators.kdj_k:.0f})")
+    if indicators.kdj_k is not None and indicators.kdj_k > config.kdj_overbought:
+        bearish_hits.append(f"KDJ超买(K={indicators.kdj_k:.0f})")
+
+    if indicators.cci is not None and indicators.cci < config.cci_oversold:
+        bullish_hits.append(f"CCI超卖({indicators.cci:.0f})")
+    if indicators.cci is not None and indicators.cci > config.cci_overbought:
+        bearish_hits.append(f"CCI超买({indicators.cci:.0f})")
+
+    if indicators.wr is not None and indicators.wr < config.wr_oversold:
+        bullish_hits.append(f"WR超卖({indicators.wr:.0f})")
+    if indicators.wr is not None and indicators.wr > config.wr_overbought:
+        bearish_hits.append(f"WR超买({indicators.wr:.0f})")
+
+    if indicators.mfi is not None and indicators.mfi < config.mfi_oversold:
+        bullish_hits.append(f"MFI资金低位({indicators.mfi:.0f})")
+    if indicators.mfi is not None and indicators.mfi > config.mfi_overbought:
+        bearish_hits.append(f"MFI资金过热({indicators.mfi:.0f})")
+
+    if indicators.adx is not None and indicators.adx >= 25:
+        if indicators.plus_di is not None and indicators.minus_di is not None:
+            if indicators.plus_di > indicators.minus_di:
+                bullish_hits.append(f"ADX趋势向上({indicators.adx:.0f})")
+            else:
+                bearish_hits.append(f"ADX趋势向下({indicators.adx:.0f})")
+
     bull_count = len(bullish_hits)
     bear_count = len(bearish_hits)
 
@@ -207,6 +241,44 @@ def compute_atr_stop_loss(
     return round(price - strategy_config.atr_stop_multiplier * indicators.atr, 2)
 
 
+def _trend_regime(adx: float | None, config: StrategyConfig = DEFAULT_STRATEGY_CONFIG) -> str:
+    if adx is None:
+        return "未知"
+    if adx >= config.adx_trend_threshold:
+        return "趋势市"
+    if adx < config.adx_range_threshold:
+        return "震荡市"
+    return "过渡区"
+
+
+def _momentum_resonance(indicators: IndicatorSnapshot, config: ResonanceConfig = DEFAULT_RESONANCE_CONFIG) -> str:
+    oversold = 0
+    overbought = 0
+    if indicators.rsi is not None and indicators.rsi < config.rsi_oversold:
+        oversold += 1
+    if indicators.kdj_k is not None and indicators.kdj_k < config.kdj_oversold:
+        oversold += 1
+    if indicators.cci is not None and indicators.cci < config.cci_oversold:
+        oversold += 1
+    if indicators.wr is not None and indicators.wr < config.wr_oversold:
+        oversold += 1
+
+    if indicators.rsi is not None and indicators.rsi > config.rsi_overbought:
+        overbought += 1
+    if indicators.kdj_k is not None and indicators.kdj_k > config.kdj_overbought:
+        overbought += 1
+    if indicators.cci is not None and indicators.cci > config.cci_overbought:
+        overbought += 1
+    if indicators.wr is not None and indicators.wr > config.wr_overbought:
+        overbought += 1
+
+    if oversold >= 2:
+        return "超卖共振"
+    if overbought >= 2:
+        return "超买共振"
+    return "无"
+
+
 def build_alerts(
     df: pd.DataFrame,
     indicators: IndicatorSnapshot,
@@ -216,6 +288,10 @@ def build_alerts(
     resonance_hits: list[str],
     money_flow: MoneyFlowSnapshot | None,
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    chip: ChipSnapshot | None = None,
+    fundamentals: FundamentalSnapshot | None = None,
+    northbound: NorthboundSnapshot | None = None,
+    momentum_resonance: str = "无",
 ) -> list[dict[str, str]]:
     alerts: list[dict[str, str]] = []
 
@@ -260,6 +336,53 @@ def build_alerts(
             }
         )
 
+    if momentum_resonance == "超卖共振":
+        alerts.append({"level": "strong", "type": "momentum", "message": "RSI+KDJ/CCI/WR 超卖共振，关注低吸"})
+    if momentum_resonance == "超买共振":
+        alerts.append({"level": "warning", "type": "momentum", "message": "RSI+KDJ/CCI/WR 超买共振，注意止盈"})
+
+    if indicators.adx is not None and indicators.adx < strategy_config.adx_range_threshold:
+        alerts.append(
+            {
+                "level": "info",
+                "type": "adx",
+                "message": f"ADX={indicators.adx:.1f}，震荡行情宜观望",
+            }
+        )
+
+    if chip and chip.profit_ratio is not None:
+        if chip.profit_ratio >= 90:
+            alerts.append({"level": "warning", "type": "chip", "message": f"获利盘 {chip.profit_ratio:.1f}%，抛压风险"})
+        elif chip.profit_ratio <= 15:
+            alerts.append({"level": "info", "type": "chip", "message": f"获利盘仅 {chip.profit_ratio:.1f}%，筹码相对稳定"})
+
+    if fundamentals and fundamentals.valuation_label in {"偏高估", "亏损"}:
+        alerts.append(
+            {
+                "level": "info",
+                "type": "valuation",
+                "message": f"估值标签：{fundamentals.valuation_label}（PE={fundamentals.pe_ttm or '-'}）",
+            }
+        )
+
+    if northbound and northbound.eligible and northbound.net_inflow_today is not None:
+        if northbound.net_inflow_today > 0:
+            alerts.append(
+                {
+                    "level": "info",
+                    "type": "northbound",
+                    "message": f"北向净流入 {northbound.net_inflow_today / 10000:.1f} 万",
+                }
+            )
+        elif northbound.net_inflow_today < 0:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "type": "northbound",
+                    "message": f"北向净流出 {abs(northbound.net_inflow_today) / 10000:.1f} 万",
+                }
+            )
+
     if money_flow and money_flow.main_net_inflow is not None:
         if money_flow.main_net_inflow > 0 and money_flow.main_net_pct and money_flow.main_net_pct >= 5:
             alerts.append(
@@ -287,6 +410,9 @@ def compute_monitoring_snapshot(
     money_flow: MoneyFlowSnapshot | None = None,
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
     resonance_config: ResonanceConfig = DEFAULT_RESONANCE_CONFIG,
+    chip: ChipSnapshot | None = None,
+    fundamentals: FundamentalSnapshot | None = None,
+    northbound: NorthboundSnapshot | None = None,
 ) -> MonitoringSnapshot:
     price = float(df.iloc[-1]["close"])
     trend_score, trend_label = compute_trend_score(price, indicators)
@@ -294,6 +420,8 @@ def compute_monitoring_snapshot(
         df, indicators, price, resonance_config
     )
     stop_loss = compute_atr_stop_loss(price, indicators, strategy_config)
+    momentum = _momentum_resonance(indicators, resonance_config)
+    regime = _trend_regime(indicators.adx, strategy_config)
 
     alerts = build_alerts(
         df,
@@ -304,6 +432,10 @@ def compute_monitoring_snapshot(
         resonance_hits,
         money_flow,
         strategy_config,
+        chip=chip,
+        fundamentals=fundamentals,
+        northbound=northbound,
+        momentum_resonance=momentum,
     )
 
     return MonitoringSnapshot(
@@ -318,6 +450,12 @@ def compute_monitoring_snapshot(
         obv_trend=_obv_trend(df),
         volume_signal=_volume_signal(df, indicators),
         boll_position=_boll_position(price, indicators),
+        adx=indicators.adx,
+        trend_regime=regime,
+        momentum_resonance=momentum,
+        chip=chip,
+        fundamentals=fundamentals,
+        northbound=northbound,
         alerts=alerts,
         money_flow=money_flow,
     )

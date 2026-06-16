@@ -350,6 +350,12 @@ button.small {
   gap: 10px;
 }
 
+@media (min-width: 1200px) {
+  .monitoring-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .monitor-card {
   background: rgba(15, 23, 42, 0.55);
   border: 1px solid rgba(148, 163, 184, 0.12);

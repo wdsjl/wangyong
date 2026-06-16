@@ -77,6 +77,38 @@ def score_momentum(indicators: IndicatorSnapshot) -> tuple[float, list[str]]:
             score -= 0.15
             reasons.append("MACD 死叉区域")
 
+    if indicators.kdj_k is not None and indicators.kdj_d is not None:
+        if indicators.kdj_k < 20 and indicators.kdj_k > indicators.kdj_d:
+            score += 0.2
+            reasons.append(f"KDJ 低位金叉(K={indicators.kdj_k:.1f})")
+        elif indicators.kdj_k > 80 and indicators.kdj_k < indicators.kdj_d:
+            score -= 0.2
+            reasons.append(f"KDJ 高位死叉(K={indicators.kdj_k:.1f})")
+
+    if indicators.cci is not None:
+        if indicators.cci < -100:
+            score += 0.15
+            reasons.append(f"CCI={indicators.cci:.1f} 超卖")
+        elif indicators.cci > 100:
+            score -= 0.15
+            reasons.append(f"CCI={indicators.cci:.1f} 超买")
+
+    if indicators.wr is not None:
+        if indicators.wr < -80:
+            score += 0.1
+            reasons.append(f"WR={indicators.wr:.1f} 超卖")
+        elif indicators.wr > -20:
+            score -= 0.1
+            reasons.append(f"WR={indicators.wr:.1f} 超买")
+
+    if indicators.mfi is not None:
+        if indicators.mfi < 20:
+            score += 0.15
+            reasons.append(f"MFI={indicators.mfi:.1f} 资金流出衰竭")
+        elif indicators.mfi > 80:
+            score -= 0.15
+            reasons.append(f"MFI={indicators.mfi:.1f} 资金过热")
+
     return score, reasons
 
 
@@ -198,6 +230,13 @@ def generate_signal(
     else:
         signal = Signal.HOLD
         reasons.append("多空因素交织，建议继续观望")
+
+    if indicators.adx is not None and indicators.adx < config.adx_range_threshold:
+        if signal in {Signal.BUY, Signal.STRONG_BUY, Signal.SELL, Signal.STRONG_SELL}:
+            signal = Signal.HOLD
+            reasons.append(f"ADX={indicators.adx:.1f}<20，震荡市屏蔽短线信号")
+    elif indicators.adx is not None and indicators.adx >= config.adx_trend_threshold:
+        reasons.append(f"ADX={indicators.adx:.1f}≥25，趋势行情")
 
     return signal, round(total_score, 3), reasons
 

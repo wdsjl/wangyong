@@ -6,7 +6,9 @@ import hashlib
 
 import pandas as pd
 
+from smart_stock.chip import compute_chip_distribution
 from smart_stock.config import DEFAULT_STRATEGY_CONFIG, StrategyConfig
+from smart_stock.fundamentals import fetch_fundamental_snapshot, fetch_northbound_snapshot
 from smart_stock.indicators import latest_indicator_snapshot
 from smart_stock.models import AnalysisResult, MoneyFlowSnapshot
 from smart_stock.signals import compute_monitoring_snapshot
@@ -53,11 +55,17 @@ def attach_monitoring(
 ) -> AnalysisResult:
     indicators = analysis.indicators or latest_indicator_snapshot(enriched)
     money_flow = fetch_money_flow_snapshot(analysis.code, demo=demo, data_source=data_source)
+    chip = compute_chip_distribution(enriched)
+    fundamentals = fetch_fundamental_snapshot(analysis.code, demo=demo or data_source != "live")
+    northbound = fetch_northbound_snapshot(analysis.code, demo=demo or data_source != "live")
     monitoring = compute_monitoring_snapshot(
         enriched,
         indicators,
         money_flow=money_flow,
         strategy_config=strategy_config,
+        chip=chip,
+        fundamentals=fundamentals,
+        northbound=northbound,
     )
     analysis.indicators = indicators
     analysis.monitoring = monitoring
@@ -70,5 +78,8 @@ def attach_monitoring(
     if monitoring.resonance_level == "strong":
         side = "共振看多" if monitoring.resonance_side == "bullish" else "共振看空"
         analysis.reasons.insert(0, f"【{side}】{'、'.join(monitoring.resonance_hits[:3])}")
+
+    if monitoring.momentum_resonance != "无":
+        analysis.reasons.insert(0, f"【动量共振】{monitoring.momentum_resonance}")
 
     return analysis

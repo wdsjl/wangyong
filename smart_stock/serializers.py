@@ -29,6 +29,12 @@ def monitoring_to_dict(monitoring: MonitoringSnapshot | None) -> dict[str, Any]:
     payload = asdict(monitoring)
     if monitoring.money_flow is not None:
         payload["money_flow"] = asdict(monitoring.money_flow)
+    if monitoring.chip is not None:
+        payload["chip"] = asdict(monitoring.chip)
+    if monitoring.fundamentals is not None:
+        payload["fundamentals"] = asdict(monitoring.fundamentals)
+    if monitoring.northbound is not None:
+        payload["northbound"] = asdict(monitoring.northbound)
     return payload
 
 
@@ -74,6 +80,15 @@ def dataframe_to_chart(df: pd.DataFrame) -> dict[str, list[Any]]:
         "boll_lower",
         "obv",
         "atr",
+        "kdj_k",
+        "kdj_d",
+        "kdj_j",
+        "cci",
+        "wr",
+        "mfi",
+        "adx",
+        "plus_di",
+        "minus_di",
     ]
 
     payload: dict[str, list[Any]] = {"dates": []}
