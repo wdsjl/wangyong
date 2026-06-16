@@ -16,9 +16,14 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000, help="监听端口")
     parser.add_argument("--demo", action="store_true", help="使用演示数据")
     parser.add_argument("--reload", action="store_true", help="开发模式自动重载")
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="SQLite 数据库路径（默认 data/smart_stock.db，也可用环境变量 SMART_STOCK_DB）",
+    )
     args = parser.parse_args()
 
-    app = create_app(demo=args.demo)
+    app = create_app(demo=args.demo, db_path=args.db)
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
 
 

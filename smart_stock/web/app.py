@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from smart_stock.service import (
     backtest_stock,
@@ -18,17 +20,45 @@ from smart_stock.service import (
     search_stocks,
     stock_insight,
 )
+from smart_stock.store import (
+    get_monitor_settings,
+    get_watchlist,
+    init_store,
+    list_alerts,
+    put_monitor_settings,
+    put_watchlist,
+    record_analysis,
+    record_batch,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app(demo: bool = False) -> FastAPI:
+class WatchlistPayload(BaseModel):
+    codes: list[str] = Field(default_factory=list)
+
+
+class MonitorSettingsPayload(BaseModel):
+    monitor_enabled: bool = True
+    interval_sec: int = Field(60, ge=15, le=3600)
+    notify_enabled: bool = False
+
+
+def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI:
+    resolved_db = init_store(db_path)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+
     app = FastAPI(
         title="智能炒股",
         description="A 股智能分析 Web 面板",
-        version="0.2.0",
+        version="0.3.0",
+        lifespan=lifespan,
     )
     app.state.demo = demo
+    app.state.db_path = resolved_db
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -40,7 +70,32 @@ def create_app(demo: bool = False) -> FastAPI:
         return {
             "demo": app.state.demo,
             "live_data_ok": live_ok,
+            "database": str(app.state.db_path),
         }
+
+    @app.get("/api/watchlist")
+    async def api_get_watchlist() -> dict:
+        return get_watchlist()
+
+    @app.put("/api/watchlist")
+    async def api_put_watchlist(payload: WatchlistPayload) -> dict:
+        return put_watchlist(payload.codes)
+
+    @app.get("/api/monitor-settings")
+    async def api_get_monitor_settings() -> dict:
+        return get_monitor_settings()
+
+    @app.put("/api/monitor-settings")
+    async def api_put_monitor_settings(payload: MonitorSettingsPayload) -> dict:
+        return put_monitor_settings(
+            monitor_enabled=payload.monitor_enabled,
+            interval_sec=payload.interval_sec,
+            notify_enabled=payload.notify_enabled,
+        )
+
+    @app.get("/api/alerts")
+    async def api_alerts(limit: int = Query(50, ge=1, le=200)) -> dict:
+        return list_alerts(limit=limit)
 
     @app.get("/api/search")
     async def api_search(
@@ -70,6 +125,7 @@ def create_app(demo: bool = False) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         payload = detail_to_dict(detail)
         payload["demo"] = use_demo or detail.data_source != "live"
+        record_analysis(payload, data_source=detail.data_source)
         return payload
 
     @app.get("/api/batch")
@@ -77,13 +133,15 @@ def create_app(demo: bool = False) -> FastAPI:
         codes: str = Query(..., description="逗号分隔的股票代码"),
         days: int = Query(120, ge=30, le=365),
         demo: bool | None = None,
+        detect_changes: bool = Query(False, description="检测信号变化并写入告警历史"),
     ) -> dict:
         use_demo = app.state.demo if demo is None else demo
         code_list = [item.strip() for item in codes.split(",") if item.strip()]
         if not code_list:
             raise HTTPException(status_code=400, detail="请至少提供一个股票代码")
         items = batch_analyze(code_list, days=days, demo=use_demo, allow_fallback=not use_demo)
-        return {"items": items, "demo": use_demo}
+        alerts = record_batch(items, detect_changes=detect_changes)
+        return {"items": items, "alerts": alerts, "demo": use_demo}
 
     @app.get("/api/compare")
     async def api_compare(

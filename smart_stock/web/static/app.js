@@ -307,11 +307,36 @@ function saveWatchlistToStorage(codes) {
   localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(codes));
 }
 
+async function loadWatchlistFromServer() {
+  try {
+    const payload = await api("/api/watchlist");
+    if (Array.isArray(payload.codes)) {
+      return [...new Set(payload.codes.map(normalizeWatchCode).filter(Boolean))];
+    }
+  } catch {
+    // 服务端不可用时回退本地
+  }
+  return null;
+}
+
+async function persistWatchlistToServer(codes) {
+  try {
+    await api("/api/watchlist", {
+      method: "PUT",
+      body: JSON.stringify({ codes }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function setWatchlistCodes(codes, { persist = true } = {}) {
   state.watchlistCodes = [...new Set(codes.map(normalizeWatchCode).filter(Boolean))];
   elements.watchInput.value = state.watchlistCodes.join(",");
   if (persist) {
     saveWatchlistToStorage(state.watchlistCodes);
+    void persistWatchlistToServer(state.watchlistCodes);
   }
   renderWatchlistChips();
 }
@@ -350,7 +375,22 @@ function keepOnlyCurrentWatchlist() {
 }
 
 function initWatchlist() {
-  setWatchlistCodes(loadWatchlistFromStorage(), { persist: false });
+  // 由 bootstrap 异步加载
+}
+
+async function bootstrapWatchlist() {
+  let codes = await loadWatchlistFromServer();
+  if (codes === null) {
+    codes = loadWatchlistFromStorage();
+  }
+  if (!codes.length) {
+    codes = [...DEFAULT_WATCHLIST];
+  }
+  setWatchlistCodes(codes, { persist: false });
+  if (codes.length) {
+    await persistWatchlistToServer(codes);
+    saveWatchlistToStorage(codes);
+  }
 }
 
 function renderWatchlistChips() {
@@ -406,14 +446,42 @@ function loadMonitorSettings() {
 }
 
 function saveMonitorSettings() {
-  localStorage.setItem(
-    MONITOR_SETTINGS_KEY,
-    JSON.stringify({
-      monitorEnabled: state.monitorEnabled,
-      monitorIntervalSec: state.monitorIntervalSec,
-      notifyEnabled: state.notifyEnabled,
-    })
-  );
+  const payload = {
+    monitorEnabled: state.monitorEnabled,
+    monitorIntervalSec: state.monitorIntervalSec,
+    notifyEnabled: state.notifyEnabled,
+  };
+  localStorage.setItem(MONITOR_SETTINGS_KEY, JSON.stringify(payload));
+  void persistMonitorSettingsToServer(payload);
+}
+
+async function loadMonitorSettingsFromServer() {
+  try {
+    const payload = await api("/api/monitor-settings");
+    return {
+      monitorEnabled: payload.monitor_enabled ?? true,
+      monitorIntervalSec: payload.interval_sec ?? 60,
+      notifyEnabled: payload.notify_enabled ?? false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function persistMonitorSettingsToServer(settings) {
+  try {
+    await api("/api/monitor-settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        monitor_enabled: settings.monitorEnabled,
+        interval_sec: settings.monitorIntervalSec,
+        notify_enabled: settings.notifyEnabled,
+      }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function loadSignalSnapshot() {
@@ -509,10 +577,22 @@ function startMonitorTimer() {
 }
 
 function initMonitorControls() {
-  loadMonitorSettings();
+  // 由 bootstrap 异步加载
+}
+
+async function bootstrapMonitorControls() {
+  const serverSettings = await loadMonitorSettingsFromServer();
+  if (serverSettings) {
+    state.monitorEnabled = serverSettings.monitorEnabled;
+    state.monitorIntervalSec = serverSettings.monitorIntervalSec;
+    state.notifyEnabled = serverSettings.notifyEnabled;
+  } else {
+    loadMonitorSettings();
+  }
   elements.monitorToggle.checked = state.monitorEnabled;
   elements.monitorInterval.value = String(state.monitorIntervalSec);
   elements.notifyToggle.checked = state.notifyEnabled;
+  saveMonitorSettings();
   startMonitorTimer();
 }
 
@@ -576,8 +656,12 @@ async function loadCompareChart() {
   }
 }
 
-async function api(path) {
-  const response = await fetch(path);
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(path, { ...options, headers });
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(payload.detail || "请求失败");
@@ -1486,9 +1570,10 @@ async function refreshWatchlist({ detectChanges = false, silent = false, withCom
   if (!silent) setStatus(detectChanges ? "正在监控刷新..." : "正在批量分析...");
 
   try {
-    const payload = await api(`/api/batch?codes=${encodeURIComponent(codes)}&days=${days}`);
-    const previous = loadSignalSnapshot();
-    const alerts = detectChanges ? detectSignalChanges(payload.items, previous) : [];
+    const payload = await api(
+      `/api/batch?codes=${encodeURIComponent(codes)}&days=${days}&detect_changes=${detectChanges}`
+    );
+    const alerts = detectChanges ? payload.alerts || detectSignalChanges(payload.items, loadSignalSnapshot()) : [];
     saveSignalSnapshot(payload.items);
     renderWatchlist(payload.items);
     if (detectChanges) {
@@ -1498,7 +1583,7 @@ async function refreshWatchlist({ detectChanges = false, silent = false, withCom
         setStatus(alerts.length ? `检测到 ${alerts.length} 条信号变化` : "监控刷新完成，信号无变化");
       }
     } else if (!silent) {
-      setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到本地）`);
+      setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到数据库）`);
     }
     if (withCompare || state.watchlistCodes.length >= 2) {
       await loadCompareChart();
@@ -1614,8 +1699,8 @@ function bindEvents() {
 
 async function bootstrap() {
   bindEvents();
-  initWatchlist();
-  initMonitorControls();
+  await bootstrapWatchlist();
+  await bootstrapMonitorControls();
   await loadConfig();
   elements.searchInput.value = state.currentCode;
   await searchStocks();
