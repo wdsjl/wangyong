@@ -73,8 +73,7 @@ def get_stock_detail(
     elif data_source == "demo_fallback":
         analysis.reasons.insert(
             0,
-            "【自动回退】实盘行情拉取失败，已改用本地模拟数据（价格不真实）。"
-            "请重启 Web 服务后执行 python main.py check-network，再刷新页面。",
+            "【网络波动】实盘行情暂时拉取失败，已展示模拟 K 线。请稍后再次点击「分析」刷新实盘数据。",
         )
 
     analysis = attach_live_spot_price(analysis, normalized_code, data_source)

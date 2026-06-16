@@ -64,7 +64,7 @@ def create_app(demo: bool = False) -> FastAPI:
                 code,
                 days=days,
                 demo=use_demo,
-                allow_fallback=False,
+                allow_fallback=not use_demo,
             )
         except Exception as exc:  # noqa: BLE001 - 统一转换为 HTTP 错误
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -82,7 +82,7 @@ def create_app(demo: bool = False) -> FastAPI:
         code_list = [item.strip() for item in codes.split(",") if item.strip()]
         if not code_list:
             raise HTTPException(status_code=400, detail="请至少提供一个股票代码")
-        items = batch_analyze(code_list, days=days, demo=use_demo, allow_fallback=False)
+        items = batch_analyze(code_list, days=days, demo=use_demo, allow_fallback=not use_demo)
         return {"items": items, "demo": use_demo}
 
     @app.get("/api/compare")
@@ -95,7 +95,7 @@ def create_app(demo: bool = False) -> FastAPI:
         code_list = [item.strip() for item in codes.split(",") if item.strip()]
         if len(code_list) < 2:
             raise HTTPException(status_code=400, detail="请至少提供两只股票进行对比")
-        series = compare_stocks(code_list, days=days, demo=use_demo, allow_fallback=False)
+        series = compare_stocks(code_list, days=days, demo=use_demo, allow_fallback=not use_demo)
         if len(series) < 2:
             raise HTTPException(status_code=400, detail="有效股票不足，无法生成对比图")
         return {"series": series, "demo": use_demo}

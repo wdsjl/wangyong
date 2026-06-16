@@ -1333,7 +1333,7 @@ async function searchStocks() {
   }
 }
 
-async function loadAnalysis() {
+async function loadAnalysis(retryCount = 0) {
   const code = elements.searchInput.value.trim() || state.currentCode;
   const days = elements.daysSelect.value;
   state.currentCode = code;
@@ -1344,17 +1344,22 @@ async function loadAnalysis() {
     const payload = await api(`/api/analyze/${encodeURIComponent(code)}?days=${days}`);
     renderAnalysis(payload);
     const sourceHint = payload.demo_fallback
-      ? "（实盘失败，当前为模拟数据，价格不真实）"
+      ? "（网络波动，已临时使用模拟 K 线，可点分析重试）"
       : payload.data_source === "live"
         ? "（实盘数据）"
         : "（演示数据）";
     setStatus(`分析完成：${payload.analysis.name}${sourceHint}`);
   } catch (error) {
+    if (retryCount < 2) {
+      setStatus(`行情拉取失败，正在重试 (${retryCount + 1}/2)...`);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      return loadAnalysis(retryCount + 1);
+    }
     showChartMessage("priceChartEmpty", `分析失败，无法加载 K 线：${error.message}`);
     showChartMessage("indicatorChartEmpty", "副图暂无数据");
     setCanvasVisible("priceChart", false);
     setCanvasVisible("indicatorChart", false);
-    setStatus(error.message, true);
+    setStatus(`${error.message}（可再次点击「分析」重试）`, true);
   }
 }
 
@@ -1491,7 +1496,8 @@ async function bootstrap() {
   await searchStocks();
   await loadAnalysis();
   if (state.watchlistCodes.length) {
-    await loadBatch();
+    // 启动时只刷新自选股列表，避免与分析接口并发打满行情源
+    await refreshWatchlist({ detectChanges: false, silent: true, withCompare: false });
   }
 }
 

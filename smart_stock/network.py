@@ -33,7 +33,7 @@ def direct_http_get_json(
     url: str,
     params: dict[str, str] | None = None,
     timeout: float = 20.0,
-    retries: int = 3,
+    retries: int = 5,
 ):
     """使用 urllib 直连 HTTP，显式禁用一切代理。
 
@@ -62,7 +62,7 @@ def direct_http_get_json(
         except Exception as exc:
             last_error = exc
             if attempt < retries - 1:
-                time.sleep(0.8 * (attempt + 1))
+                time.sleep(1.0 * (attempt + 1))
                 continue
             break
 
