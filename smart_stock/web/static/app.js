@@ -17,6 +17,7 @@ const state = {
   compareChart: null,
   backtestChart: null,
   analyzeRequestId: 0,
+  chartRenderToken: 0,
 };
 
 const elements = {
@@ -397,12 +398,14 @@ function initMonitorControls() {
 }
 
 function renderCompareChart(series) {
-  destroyChart(state.compareChart);
+  releaseCanvas("compareChart");
+  state.compareChart = null;
   if (!series.length) {
     return;
   }
 
-  const ctx = document.getElementById("compareChart");
+  const ctx = releaseCanvas("compareChart");
+  if (!ctx) return;
   state.compareChart = new Chart(ctx, {
     type: "line",
     data: {
@@ -662,8 +665,33 @@ function renderWatchlist(items) {
   });
 }
 
+function releaseCanvas(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const existing = typeof Chart.getChart === "function" ? Chart.getChart(canvas) : null;
+  if (existing) {
+    existing.destroy();
+  }
+  return canvas;
+}
+
 function destroyChart(chart) {
-  if (chart) chart.destroy();
+  if (!chart) return;
+  try {
+    chart.destroy();
+  } catch (error) {
+    console.warn("destroy chart failed", error);
+  }
+}
+
+function destroyCanvasChart(canvasId) {
+  releaseCanvas(canvasId);
+  if (canvasId === "priceChart") {
+    state.priceChart = null;
+  }
+  if (canvasId === "indicatorChart") {
+    state.indicatorChart = null;
+  }
 }
 
 function baseChartOptions(extra = {}) {
@@ -723,12 +751,16 @@ function baseChartOptions(extra = {}) {
 }
 
 function buildCandlestickData(chart) {
-  return chart.dates.map((_, index) => ({
-    o: Number(chart.open[index]),
-    h: Number(chart.high[index]),
-    l: Number(chart.low[index]),
-    c: Number(chart.close[index]),
-  }));
+  return chart.dates.map((_, index) => {
+    const o = Number(chart.open[index]);
+    const h = Number(chart.high[index]);
+    const l = Number(chart.low[index]);
+    const c = Number(chart.close[index]);
+    if (![o, h, l, c].every(Number.isFinite)) {
+      return { o: 0, h: 0, l: 0, c: 0 };
+    }
+    return { o, h, l, c };
+  });
 }
 
 function buildVolumeColors(chart) {
@@ -761,7 +793,6 @@ function buildLineDataset(label, data, color, dashed = false) {
 
 function buildPriceChartOptions(extra = {}) {
   return baseChartOptions({
-    parsing: false,
     ...extra,
     scales: {
       x: {
@@ -779,7 +810,7 @@ function buildPriceChartOptions(extra = {}) {
 }
 
 function buildPriceDatasets(chart) {
-  const datasets = [
+  return [
     {
       type: "candlestick",
       label: "K线",
@@ -795,21 +826,7 @@ function buildPriceDatasets(chart) {
         unchanged: "#94a3b8",
       },
     },
-    buildLineDataset("MA5", chart.ma5, chartColors.ma5),
-    buildLineDataset("MA10", chart.ma10, chartColors.ma10),
-    buildLineDataset("MA20", chart.ma20, chartColors.ma20),
-    buildLineDataset("MA60", chart.ma60, chartColors.ma60),
   ];
-
-  if (state.showBollinger) {
-    datasets.push(
-      buildLineDataset("BOLL 上轨", chart.boll_upper, chartColors.upper, true),
-      buildLineDataset("BOLL 中轨", chart.boll_middle, chartColors.middle),
-      buildLineDataset("BOLL 下轨", chart.boll_lower, chartColors.lower, true)
-    );
-  }
-
-  return datasets;
 }
 
 function getIndicatorSummary(index) {
@@ -987,7 +1004,11 @@ function attachChartInteractions(chart) {
 
 function renderCharts() {
   const chart = state.chartData;
+  const renderToken = ++state.chartRenderToken;
+
   if (!chart || !chart.dates?.length) {
+    destroyCanvasChart("priceChart");
+    destroyCanvasChart("indicatorChart");
     showChartMessage("priceChartEmpty", "暂无 K 线数据，请先点击「分析」加载股票");
     showChartMessage("indicatorChartEmpty", "暂无副图数据");
     setCanvasVisible("priceChart", false);
@@ -1000,11 +1021,14 @@ function renderCharts() {
   setCanvasVisible("priceChart", true);
   setCanvasVisible("indicatorChart", true);
 
-  destroyChart(state.priceChart);
-  destroyChart(state.indicatorChart);
+  destroyCanvasChart("priceChart");
+  destroyCanvasChart("indicatorChart");
+  if (renderToken !== state.chartRenderToken) return;
 
   try {
-    const priceCtx = document.getElementById("priceChart");
+    const priceCtx = releaseCanvas("priceChart");
+    if (!priceCtx || renderToken !== state.chartRenderToken) return;
+
     state.priceChart = new Chart(priceCtx, {
       type: "candlestick",
       data: {
@@ -1014,7 +1038,13 @@ function renderCharts() {
       options: buildPriceChartOptions(),
     });
 
-    const indicatorCtx = document.getElementById("indicatorChart");
+    const indicatorCtx = releaseCanvas("indicatorChart");
+    if (!indicatorCtx || renderToken !== state.chartRenderToken) {
+      destroyChart(state.priceChart);
+      state.priceChart = null;
+      return;
+    }
+
     state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
 
     attachChartInteractions(state.priceChart);
@@ -1022,29 +1052,34 @@ function renderCharts() {
     focusInitialHover();
   } catch (error) {
     console.error(error);
-    destroyChart(state.priceChart);
-    destroyChart(state.indicatorChart);
-    state.priceChart = null;
-    state.indicatorChart = null;
+    destroyCanvasChart("priceChart");
+    destroyCanvasChart("indicatorChart");
+    if (renderToken !== state.chartRenderToken) return;
     try {
-      renderPriceChartFallback(chart);
-      const indicatorCtx = document.getElementById("indicatorChart");
+      renderPriceChartFallback(chart, renderToken);
+      if (renderToken !== state.chartRenderToken) return;
+      const indicatorCtx = releaseCanvas("indicatorChart");
+      if (!indicatorCtx) return;
       state.indicatorChart = new Chart(indicatorCtx, buildIndicatorConfig(chart, state.activeIndicator));
       attachChartInteractions(state.indicatorChart);
       hideChartMessage("priceChartEmpty");
       setStatus(`蜡烛图插件异常，已显示收盘价折线图（${error.message}）`, true);
     } catch (fallbackError) {
+      destroyCanvasChart("priceChart");
+      destroyCanvasChart("indicatorChart");
       showChartMessage("priceChartEmpty", `K 线加载失败：${error.message}`);
       showChartMessage("indicatorChartEmpty", `副图加载失败：${fallbackError.message}`);
       setCanvasVisible("priceChart", false);
       setCanvasVisible("indicatorChart", false);
-      throw error;
     }
   }
 }
 
-function renderPriceChartFallback(chart) {
-  const priceCtx = document.getElementById("priceChart");
+function renderPriceChartFallback(chart, renderToken = state.chartRenderToken) {
+  destroyCanvasChart("priceChart");
+  if (renderToken !== state.chartRenderToken) return;
+  const priceCtx = releaseCanvas("priceChart");
+  if (!priceCtx) return;
   state.priceChart = new Chart(priceCtx, {
     type: "line",
     data: {
@@ -1140,8 +1175,9 @@ function buildIndicatorConfig(chart, type) {
 
 function rerenderIndicatorChart() {
   if (!state.chartData) return;
-  destroyChart(state.indicatorChart);
-  const indicatorCtx = document.getElementById("indicatorChart");
+  destroyCanvasChart("indicatorChart");
+  const indicatorCtx = releaseCanvas("indicatorChart");
+  if (!indicatorCtx) return;
   state.indicatorChart = new Chart(
     indicatorCtx,
     buildIndicatorConfig(state.chartData, state.activeIndicator)
@@ -1160,9 +1196,11 @@ function rerenderIndicatorChart() {
 
 function rerenderPriceChart() {
   if (!state.chartData) return;
-  destroyChart(state.priceChart);
+  const renderToken = ++state.chartRenderToken;
+  destroyCanvasChart("priceChart");
   try {
-    const priceCtx = document.getElementById("priceChart");
+    const priceCtx = releaseCanvas("priceChart");
+    if (!priceCtx || renderToken !== state.chartRenderToken) return;
     state.priceChart = new Chart(priceCtx, {
       type: "candlestick",
       data: {
@@ -1175,8 +1213,8 @@ function rerenderPriceChart() {
     hideChartMessage("priceChartEmpty");
     setCanvasVisible("priceChart", true);
   } catch (error) {
-    renderPriceChartFallback(state.chartData);
-    showChartMessage("priceChartEmpty", `蜡烛图加载失败，已回退为折线图。(${error.message})`);
+    renderPriceChartFallback(state.chartData, renderToken);
+    setStatus(`蜡烛图加载失败，已回退为折线图。(${error.message})`, true);
   }
   if (state.hoverIndex != null) {
     syncActiveElements(state.hoverIndex);
@@ -1471,6 +1509,15 @@ function bindEvents() {
   elements.resetZoomBtn.addEventListener("click", resetZoom);
   elements.showBollToggle.addEventListener("change", (event) => {
     state.showBollinger = event.target.checked;
+    state.activeIndicator = state.showBollinger ? "boll" : state.activeIndicator;
+    if (state.showBollinger) {
+      document.querySelectorAll(".chart-tabs button").forEach((node) => {
+        node.classList.toggle("active", node.dataset.chart === "boll");
+      });
+      rerenderIndicatorChart();
+      setStatus("布林带已切换到下方副图显示");
+      return;
+    }
     rerenderPriceChart();
   });
   elements.searchInput.addEventListener("keydown", (event) => {
