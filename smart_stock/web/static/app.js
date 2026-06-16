@@ -680,16 +680,23 @@ async function loadCompareChart() {
   }
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}, timeoutMs = 15000) {
   const headers = { ...(options.headers || {}) };
   if (options.body && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
-    response = await fetch(path, { ...options, headers });
-  } catch {
+    response = await fetch(path, { ...options, headers, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("请求超时，请确认 web_main.py 正在运行且网络正常");
+    }
     throw new Error("无法连接后端，请确认终端中正在运行：python web_main.py --port 8000");
+  } finally {
+    clearTimeout(timer);
   }
 
   let payload = {};

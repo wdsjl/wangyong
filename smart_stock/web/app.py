@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -59,14 +60,21 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
     )
     app.state.demo = demo
     app.state.db_path = resolved_db
+    app.state._live_ok_cache: tuple[bool, float] | None = None
 
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/api/health")
+    async def health() -> dict:
+        return {"ok": True, "demo": app.state.demo}
+
     @app.get("/api/config")
     async def get_config() -> dict:
-        live_ok = app.state.demo or check_live_data_available()
+        live_ok = bool(app.state.demo)
+        if not app.state.demo:
+            live_ok = _get_cached_live_ok(app)
         return {
             "demo": app.state.demo,
             "live_data_ok": live_ok,
@@ -189,3 +197,13 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
+
+
+def _get_cached_live_ok(app: FastAPI, ttl_seconds: float = 120.0) -> bool:
+    now = time.time()
+    cache = getattr(app.state, "_live_ok_cache", None)
+    if cache and now - cache[1] < ttl_seconds:
+        return cache[0]
+    live_ok = check_live_data_available(quick=True)
+    app.state._live_ok_cache = (live_ok, now)
+    return live_ok

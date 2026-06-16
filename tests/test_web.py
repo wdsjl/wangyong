@@ -32,6 +32,12 @@ def test_api_config(client):
     assert "database" in payload
 
 
+def test_api_health(client):
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
 def test_api_search_demo(client):
     response = client.get("/api/search", params={"keyword": "茅台"})
     assert response.status_code == 200

@@ -173,8 +173,16 @@ def detail_to_dict(detail: StockDetail) -> dict:
     }
 
 
-def check_live_data_available() -> bool:
-    """探测能否拉取一只样本股的实盘日线。"""
+def check_live_data_available(*, quick: bool = False) -> bool:
+    """探测能否拉取实盘行情。"""
+    if quick:
+        try:
+            from smart_stock.eastmoney import fetch_spot_quote
+
+            return fetch_spot_quote("000815") is not None
+        except Exception:
+            return False
+
     try:
         bars, source = fetch_daily_bars_safe("000815", days=30, demo=False, allow_fallback=False)
     except DataFetchError:
