@@ -189,11 +189,12 @@ const candlestickPlugin = {
     if (!xScale || !yScale) return;
 
     const ctx = chart.ctx;
+    const { left, right } = chart.chartArea;
     const count = chartData.dates.length;
     let barWidth = 8;
     if (count > 1) {
       const step = Math.abs(xScale.getPixelForValue(1) - xScale.getPixelForValue(0));
-      barWidth = Math.max(3, step * 0.55);
+      barWidth = Math.max(3, step * 0.5);
     }
 
     for (let index = 0; index < count; index += 1) {
@@ -204,6 +205,8 @@ const candlestickPlugin = {
       if (![open, high, low, close].every(Number.isFinite)) continue;
 
       const x = xScale.getPixelForValue(index);
+      if (x < left - barWidth || x > right + barWidth) continue;
+
       const yHigh = yScale.getPixelForValue(high);
       const yLow = yScale.getPixelForValue(low);
       const yOpen = yScale.getPixelForValue(open);
@@ -214,6 +217,9 @@ const candlestickPlugin = {
       const bodyTop = Math.min(yOpen, yClose);
       const bodyBottom = Math.max(yOpen, yClose);
       const bodyHeight = Math.max(1, bodyBottom - bodyTop);
+      const bodyLeft = Math.max(left, x - barWidth / 2);
+      const bodyRight = Math.min(right, x + barWidth / 2);
+      const bodyWidth = Math.max(1, bodyRight - bodyLeft);
 
       ctx.save();
       ctx.strokeStyle = stroke;
@@ -223,7 +229,7 @@ const candlestickPlugin = {
       ctx.lineTo(x, yLow);
       ctx.stroke();
       ctx.fillStyle = fill;
-      ctx.fillRect(x - barWidth / 2, bodyTop, barWidth, bodyHeight);
+      ctx.fillRect(bodyLeft, bodyTop, bodyWidth, bodyHeight);
       ctx.restore();
     }
   },
@@ -939,6 +945,9 @@ function baseChartOptions(extra = {}) {
   const options = {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: { left: 6, right: 18, top: 4, bottom: 0 },
+    },
     interaction: { mode: "index", intersect: false },
     plugins: {
       legend: {
@@ -980,8 +989,9 @@ function baseChartOptions(extra = {}) {
     },
     scales: {
       x: {
+        offset: true,
         ticks: { color: "#94a3b8", maxTicksLimit: 10 },
-        grid: { color: "rgba(148, 163, 184, 0.08)" },
+        grid: { color: "rgba(148, 163, 184, 0.08)", offset: false },
       },
       y: {
         ticks: { color: "#94a3b8" },
@@ -1060,8 +1070,9 @@ function buildPriceChartOptions(extra = {}) {
     scales: {
       x: {
         type: "category",
+        offset: true,
         ticks: { color: "#94a3b8", maxTicksLimit: 10 },
-        grid: { color: "rgba(148, 163, 184, 0.08)" },
+        grid: { color: "rgba(148, 163, 184, 0.08)", offset: false },
       },
       y: {
         ticks: { color: "#94a3b8" },
