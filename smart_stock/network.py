@@ -158,6 +158,8 @@ def diagnose_network(code: str = "000815") -> list[str]:
         lines.append(f"读取系统代理失败: {exc}")
 
     try:
+        from smart_stock.eastmoney import to_secid
+
         payload = direct_http_get_json(
             "https://push2his.eastmoney.com/api/qt/stock/kline/get",
             params={
@@ -166,7 +168,7 @@ def diagnose_network(code: str = "000815") -> list[str]:
                 "ut": "7eea3edcaed734bea9cbfc24409ed989",
                 "klt": "101",
                 "fqt": "1",
-                "secid": "0." + "".join(ch for ch in code if ch.isdigit()).zfill(6)[-6:],
+                "secid": to_secid(code),
                 "beg": "20250601",
                 "end": "20250610",
             },

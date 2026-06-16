@@ -540,7 +540,14 @@ function renderAnalysis(payload) {
   state.hoverIndex = null;
   elements.crosshairInfo.textContent = "移动鼠标到图表上查看数据，或使用 ← → 键逐根切换 K 线";
 
-  elements.stockTitle.textContent = `${analysis.name} (${analysis.code})`;
+  const sourceLabel =
+    payload.data_source === "live"
+      ? "实盘"
+      : payload.demo_fallback
+        ? "模拟回退"
+        : "演示";
+  const sourceClass = payload.data_source === "live" ? "live" : "warning";
+  elements.stockTitle.innerHTML = `${analysis.name} (${analysis.code}) <span class="badge ${sourceClass}">${sourceLabel}</span>`;
   state.currentCode = analysis.code;
   renderWatchlistChips();
   elements.latestPrice.textContent = formatPrice(analysis.latest_price);
@@ -1171,12 +1178,13 @@ async function loadConfig() {
   state.demo = config.demo;
   if (config.demo) {
     elements.modeBadge.textContent = "演示模式";
-  } else if (!config.akshare_installed) {
-    elements.modeBadge.textContent = "实盘不可用：未安装 akshare";
+    elements.modeBadge.className = "badge warning";
   } else if (!config.live_data_ok) {
-    elements.modeBadge.textContent = "实盘拉取失败：已可自动回退演示";
+    elements.modeBadge.textContent = "实盘暂不可用";
+    elements.modeBadge.className = "badge warning";
   } else {
     elements.modeBadge.textContent = "实时行情模式";
+    elements.modeBadge.className = "badge live";
   }
 }
 
@@ -1207,10 +1215,10 @@ async function loadAnalysis() {
     const payload = await api(`/api/analyze/${encodeURIComponent(code)}?days=${days}`);
     renderAnalysis(payload);
     const sourceHint = payload.demo_fallback
-      ? "（实盘失败，已自动使用演示数据）"
+      ? "（实盘失败，当前为模拟数据，价格不真实）"
       : payload.data_source === "live"
         ? "（实盘数据）"
-        : "";
+        : "（演示数据）";
     setStatus(`分析完成：${payload.analysis.name}${sourceHint}`);
   } catch (error) {
     setStatus(error.message, true);

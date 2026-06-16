@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -107,13 +107,31 @@ def fetch_daily_bars(
     days: int,
 ) -> pd.DataFrame:
     """获取日线并裁剪到指定天数。"""
-    raw = fetch_kline(
-        code=code,
-        start_date=start_date.strftime("%Y%m%d"),
-        end_date=end_date.strftime("%Y%m%d"),
-        period="daily",
-        adjust="qfq",
+    span_candidates = sorted(
+        {max(days * 2, 365), max(days * 2, 180), max(days + 30, 90), days + 15},
+        reverse=True,
     )
-    if raw.empty:
-        raise ValueError(f"未获取到股票 {code} 的行情数据")
-    return raw.tail(days).reset_index(drop=True)
+    last_error: Exception | None = None
+
+    for span_days in span_candidates:
+        window_start = end_date - timedelta(days=span_days)
+        try:
+            raw = fetch_kline(
+                code=code,
+                start_date=window_start.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                period="daily",
+                adjust="qfq",
+            )
+            if raw.empty:
+                continue
+            trimmed = raw.tail(days).reset_index(drop=True)
+            if len(trimmed) >= min(days, 30):
+                return trimmed
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError(f"未获取到股票 {code} 的行情数据")

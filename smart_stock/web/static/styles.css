@@ -68,6 +68,25 @@ a {
   font-size: 0.9rem;
 }
 
+.badge.live {
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.35);
+  color: #a7f3d0;
+}
+
+.badge.warning {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #fde68a;
+}
+
+#stockTitle .badge {
+  margin-left: 8px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  vertical-align: middle;
+}
+
 .panel {
   background: rgba(17, 26, 46, 0.92);
   border: 1px solid var(--border);

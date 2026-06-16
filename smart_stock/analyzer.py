@@ -53,7 +53,8 @@ def analyze_stock(
     elif data_source == "demo_fallback":
         result.reasons.insert(
             0,
-            "【自动回退】实盘行情拉取失败，已改用演示数据。请安装 akshare 并检查网络：pip install akshare -i https://pypi.org/simple",
+            "【自动回退】实盘行情拉取失败，已改用本地模拟数据（价格不真实）。"
+            "请执行 python main.py check-network 排查后重试。",
         )
     return result
 

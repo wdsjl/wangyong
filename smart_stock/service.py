@@ -66,7 +66,8 @@ def get_stock_detail(
     elif data_source == "demo_fallback":
         analysis.reasons.insert(
             0,
-            "【自动回退】实盘行情拉取失败，已改用演示数据。请安装 akshare 并检查网络：pip install akshare -i https://pypi.org/simple",
+            "【自动回退】实盘行情拉取失败，已改用本地模拟数据（价格不真实）。"
+            "请重启 Web 服务后执行 python main.py check-network，再刷新页面。",
         )
 
     return StockDetail(analysis=analysis, chart=dataframe_to_chart(enriched), data_source=data_source)
@@ -164,12 +165,12 @@ def detail_to_dict(detail: StockDetail) -> dict:
 def check_live_data_available() -> bool:
     """探测能否拉取一只样本股的实盘日线。"""
     try:
-        fetch_daily_bars_safe("600519", days=30, demo=False, allow_fallback=False)
+        bars, source = fetch_daily_bars_safe("000815", days=30, demo=False, allow_fallback=False)
     except DataFetchError:
         return False
     except Exception:
         return False
-    return True
+    return source == "live" and not bars.empty
 
 
 def is_akshare_installed() -> bool:

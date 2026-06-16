@@ -43,6 +43,21 @@ def test_to_secid():
 
 
 @patch("smart_stock.eastmoney.direct_http_get_json")
+def test_fetch_daily_bars_retries_shorter_window(mock_get_json):
+    mock_get_json.side_effect = [
+        ConnectionError("timeout on long window"),
+        KLINE_PAYLOAD,
+    ]
+    from datetime import datetime, timedelta
+
+    end = datetime(2026, 6, 16)
+    start = end - timedelta(days=400)
+    frame = eastmoney.fetch_daily_bars("000815", start, end, days=2)
+    assert len(frame) == 2
+    assert mock_get_json.call_count == 2
+
+
+@patch("smart_stock.eastmoney.direct_http_get_json")
 def test_fetch_kline_parses_rows(mock_get_json):
     mock_get_json.return_value = KLINE_PAYLOAD
     frame = eastmoney.fetch_kline("000815", "20250601", "20250615")
