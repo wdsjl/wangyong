@@ -10,6 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from smart_stock.analyzer import analyze_many, analyze_stock, search_stock
+from smart_stock.network import diagnose_network
 from smart_stock.backtest import BacktestConfig, run_backtest
 from smart_stock.llm_insight import generate_insight
 from smart_stock.models import AnalysisResult, Signal
@@ -157,6 +158,8 @@ def build_parser() -> argparse.ArgumentParser:
     insight_parser.add_argument("code", help="股票代码")
     insight_parser.add_argument("--days", type=int, default=120, help="技术分析回看天数")
 
+    subparsers.add_parser("check-network", help="检测行情接口网络连通性")
+
     return parser
 
 
@@ -166,7 +169,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "analyze":
-            result = analyze_stock(args.code, days=args.days, demo=args.demo)
+            result = analyze_stock(
+                args.code,
+                days=args.days,
+                demo=args.demo,
+                allow_fallback=not args.demo,
+            )
             render_analysis(result)
         elif args.command == "search":
             results = search_stock(args.keyword, limit=args.limit, demo=args.demo)
@@ -175,7 +183,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             render_search_results(results)
         elif args.command == "batch":
-            results = analyze_many(args.codes, days=args.days, demo=args.demo)
+            results = analyze_many(
+                args.codes,
+                days=args.days,
+                demo=args.demo,
+                allow_fallback=not args.demo,
+            )
             render_batch_results(results)
         elif args.command == "backtest":
             result = run_backtest(
@@ -190,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "insight":
             payload = generate_insight(args.code, days=args.days, demo=args.demo)
             render_insight(payload)
+        elif args.command == "check-network":
+            for line in diagnose_network():
+                console.print(line)
     except Exception as exc:  # noqa: BLE001 - CLI 需要统一展示错误
         console.print(f"[red]执行失败: {exc}[/red]")
         console.print("[dim]提示: 可尝试添加 --demo 参数使用本地演示数据[/dim]")
