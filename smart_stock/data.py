@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
+from smart_stock.network import format_fetch_error, without_system_proxy
 from smart_stock.sample_data import generate_demo_bars, get_demo_name, search_demo_stocks
 
 try:
@@ -47,7 +48,11 @@ def search_stock(keyword: str, limit: int = 10, demo: bool = False) -> pd.DataFr
     if ak is None:
         raise DataFetchError("未安装 akshare，请执行 pip install akshare")
 
-    stock_list = ak.stock_info_a_code_name()
+    try:
+        with without_system_proxy():
+            stock_list = ak.stock_info_a_code_name()
+    except Exception as exc:
+        raise DataFetchError(format_fetch_error(exc)) from exc
     stock_list = stock_list.rename(columns={"code": "代码", "name": "名称"})
 
     if keyword.isdigit():
@@ -85,13 +90,17 @@ def fetch_daily_bars(code: str, days: int = 180, demo: bool = False) -> pd.DataF
     end_date = datetime.now()
     start_date = end_date - timedelta(days=max(days * 2, 365))
 
-    raw = ak.stock_zh_a_hist(
-        symbol=code,
-        period="daily",
-        start_date=start_date.strftime("%Y%m%d"),
-        end_date=end_date.strftime("%Y%m%d"),
-        adjust="qfq",
-    )
+    try:
+        with without_system_proxy():
+            raw = ak.stock_zh_a_hist(
+                symbol=code,
+                period="daily",
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+                adjust="qfq",
+            )
+    except Exception as exc:
+        raise DataFetchError(format_fetch_error(exc)) from exc
     if raw.empty:
         raise DataFetchError(f"未获取到股票 {code} 的行情数据")
 

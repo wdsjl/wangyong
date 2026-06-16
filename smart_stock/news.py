@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from smart_stock.data import normalize_code
+from smart_stock.network import without_system_proxy
 from smart_stock.sample_data import get_demo_name
 
 try:
@@ -98,7 +99,8 @@ def fetch_stock_news(code: str, limit: int = 5, demo: bool = False) -> list[News
         return _demo_news(normalized_code, limit)
 
     try:
-        raw = ak.stock_news_em(symbol=normalized_code)
+        with without_system_proxy():
+            raw = ak.stock_news_em(symbol=normalized_code)
         if raw is None or raw.empty:
             return _demo_news(normalized_code, limit)
 
