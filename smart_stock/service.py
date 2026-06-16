@@ -54,7 +54,7 @@ def get_stock_detail(
         indicators=indicators,
     )
     if demo:
-        analysis.reasons.insert(0, "当前为演示模式，数据为本地模拟生成")
+        analysis.reasons.insert(0, "【演示模式】价格为本地模拟数据，非真实行情；要看实盘请去掉 --demo")
 
     return StockDetail(analysis=analysis, chart=dataframe_to_chart(enriched))
 

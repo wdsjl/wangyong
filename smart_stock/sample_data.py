@@ -9,8 +9,18 @@ import pandas as pd
 STOCK_NAMES = {
     "600519": "贵州茅台",
     "000001": "平安银行",
+    "000815": "美利云",
     "300750": "宁德时代",
     "601318": "中国平安",
+}
+
+# 演示模式参考价（量级接近真实股价，仅供离线演示，非实时行情）
+STOCK_BASE_PRICES = {
+    "600519": 1450.0,
+    "000001": 11.0,
+    "000815": 11.5,
+    "300750": 200.0,
+    "601318": 45.0,
 }
 
 
@@ -28,14 +38,14 @@ def search_demo_stocks(keyword: str, limit: int = 10) -> pd.DataFrame:
 
 
 def generate_demo_bars(code: str, days: int = 120, seed: int | None = None) -> pd.DataFrame:
-    """基于随机游走生成可复现的演示 K 线。"""
+    """基于随机游走生成可复现的演示 K 线（非真实行情）。"""
     if seed is None:
         seed = sum(ord(ch) for ch in code)
 
     rng = np.random.default_rng(seed)
     dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=days)
 
-    base_price = 50 + (seed % 500)
+    base_price = STOCK_BASE_PRICES.get(code, 50 + (seed % 500))
     returns = rng.normal(0.001, 0.02, size=days)
     close = base_price * np.cumprod(1 + returns)
 

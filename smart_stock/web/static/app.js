@@ -72,7 +72,7 @@ const signalClassMap = {
 const WATCHLIST_STORAGE_KEY = "smart_stock_watchlist";
 const SIGNAL_SNAPSHOT_KEY = "smart_stock_signal_snapshot";
 const MONITOR_SETTINGS_KEY = "smart_stock_monitor_settings";
-const DEFAULT_WATCHLIST = ["600519", "000001", "300750"];
+const DEFAULT_WATCHLIST = ["600519", "000001", "000815", "300750"];
 
 const COMPARE_COLORS = ["#38bdf8", "#f472b6", "#fbbf24", "#34d399", "#c084fc", "#fb7185", "#22d3ee", "#f97316"];
 

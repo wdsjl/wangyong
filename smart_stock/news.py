@@ -23,6 +23,14 @@ class NewsItem:
 
 
 DEMO_NEWS: dict[str, list[dict[str, str]]] = {
+    "000815": [
+        {
+            "title": "美利云推进数据中心业务布局",
+            "source": "证券日报",
+            "published_at": "2026-06-10",
+            "summary": "公司持续关注东数西算相关机会，经营改善仍需观察兑现节奏。",
+        }
+    ],
     "600519": [
         {
             "title": "贵州茅台发布季度经营数据，营收保持稳健增长",
