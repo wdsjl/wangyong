@@ -103,3 +103,37 @@ def test_api_monitor_settings(client):
 
     get_response = client.get("/api/monitor-settings")
     assert get_response.json()["notify_enabled"] is True
+
+
+def test_api_monitor_board_empty(client):
+    response = client.get("/api/monitor/board", params={"days": 60})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"] == []
+    assert payload["alerts"] == []
+    assert payload["codes"] == []
+    assert "updated_at" in payload
+
+
+def test_api_monitor_board_with_codes(client):
+    response = client.get(
+        "/api/monitor/board",
+        params={"codes": "600519,000001", "days": 60, "detect_changes": False},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) == 2
+    assert payload["codes"] == ["600519", "000001"]
+    assert payload["items"][0]["code"] in {"600519", "000001"}
+    assert "signal" in payload["items"][0]
+    assert "monitoring" in payload["items"][0]
+
+
+def test_api_monitor_board_from_watchlist(client):
+    client.put("/api/watchlist", json={"codes": ["600519"]})
+    response = client.get("/api/monitor/board", params={"days": 60, "detect_changes": False})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["codes"] == ["600519"]
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["code"] == "600519"

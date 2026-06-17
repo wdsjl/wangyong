@@ -13,12 +13,18 @@ const state = {
   monitorIntervalSec: 60,
   notifyEnabled: false,
   monitorTimer: null,
+  countdownTimer: null,
   priceChart: null,
   indicatorChart: null,
   compareChart: null,
   backtestChart: null,
   analyzeRequestId: 0,
   chartRenderToken: 0,
+  syncChartOnMonitor: false,
+  liveBoardItems: [],
+  lastBoardRefreshAt: null,
+  nextRefreshAt: null,
+  boardRefreshing: false,
 };
 
 const elements = {
@@ -81,6 +87,10 @@ const elements = {
   chipText: document.getElementById("chipText"),
   valuationText: document.getElementById("valuationText"),
   northboundText: document.getElementById("northboundText"),
+  monitorStatusText: document.getElementById("monitorStatusText"),
+  monitorBadge: document.getElementById("monitorBadge"),
+  liveBoardBody: document.getElementById("liveBoardBody"),
+  syncChartToggle: document.getElementById("syncChartToggle"),
 };
 
 const signalClassMap = {
@@ -375,9 +385,12 @@ function highlightActiveStock(code) {
   document.querySelectorAll(".result-item").forEach((node) => {
     node.classList.toggle("active", node.dataset.code === code);
   });
+  document.querySelectorAll(".live-board-row").forEach((node) => {
+    node.classList.toggle("active", node.dataset.code === code);
+  });
 }
 
-function setWatchlistCodes(codes, { persist = true } = {}) {
+function setWatchlistCodes(codes, { persist = true, refreshBoard = true } = {}) {
   state.watchlistCodes = [...new Set(codes.map(normalizeWatchCode).filter(Boolean))];
   elements.watchInput.value = state.watchlistCodes.join(",");
   if (persist) {
@@ -385,6 +398,15 @@ function setWatchlistCodes(codes, { persist = true } = {}) {
     void persistWatchlistToServer(state.watchlistCodes);
   }
   renderWatchlistChips();
+  if (!refreshBoard) return;
+  if (state.watchlistCodes.length) {
+    void refreshLiveBoard({ detectChanges: false, silent: true, withWatchlist: true });
+  } else {
+    renderLiveBoard([]);
+    elements.watchlist.innerHTML = '<div class="empty">自选股已清空，可添加新股票</div>';
+    elements.alertPanel.innerHTML = '<div class="empty">暂无盯盘提醒</div>';
+    updateMonitorStatusBar();
+  }
 }
 
 function addToWatchlist(code) {
@@ -401,11 +423,13 @@ function removeFromWatchlist(code) {
 }
 
 function clearWatchlist() {
-  setWatchlistCodes([]);
+  setWatchlistCodes([], { refreshBoard: false });
+  renderLiveBoard([]);
   elements.watchlist.innerHTML = '<div class="empty">自选股已清空，可添加新股票</div>';
-  elements.alertPanel.innerHTML = '<div class="empty">暂无信号变化告警</div>';
+  elements.alertPanel.innerHTML = '<div class="empty">暂无盯盘提醒</div>';
   destroyChart(state.compareChart);
   state.compareChart = null;
+  updateMonitorStatusBar();
   setStatus("已清空自选股");
 }
 
@@ -432,7 +456,7 @@ async function bootstrapWatchlist() {
   if (!codes.length) {
     codes = [...DEFAULT_WATCHLIST];
   }
-  setWatchlistCodes(codes, { persist: false });
+  setWatchlistCodes(codes, { persist: false, refreshBoard: false });
   if (codes.length) {
     void persistWatchlistToServer(codes);
     saveWatchlistToStorage(codes);
@@ -654,13 +678,168 @@ function stopMonitorTimer() {
     clearInterval(state.monitorTimer);
     state.monitorTimer = null;
   }
+  if (state.countdownTimer) {
+    clearInterval(state.countdownTimer);
+    state.countdownTimer = null;
+  }
+}
+
+function scheduleNextRefresh() {
+  state.nextRefreshAt = Date.now() + state.monitorIntervalSec * 1000;
+}
+
+function updateMonitorStatusBar() {
+  if (!elements.monitorStatusText) return;
+
+  const last = state.lastBoardRefreshAt
+    ? new Date(state.lastBoardRefreshAt).toLocaleTimeString()
+    : "未刷新";
+  const remain =
+    state.nextRefreshAt && state.monitorEnabled
+      ? Math.max(0, Math.ceil((state.nextRefreshAt - Date.now()) / 1000))
+      : null;
+
+  if (!state.monitorEnabled) {
+    elements.monitorStatusText.textContent = `自动监控已关闭 · 上次看板刷新 ${last}`;
+    if (elements.monitorBadge) {
+      elements.monitorBadge.textContent = "监控已暂停";
+      elements.monitorBadge.className = "badge warning monitor-badge";
+    }
+    return;
+  }
+
+  const remainText = remain == null ? state.monitorIntervalSec : remain;
+  elements.monitorStatusText.textContent = state.boardRefreshing
+    ? "正在刷新实时看板..."
+    : `监控运行中 · 上次 ${last} · ${remainText}s 后刷新 · 可边看下方 K 线`;
+  if (elements.monitorBadge) {
+    elements.monitorBadge.textContent = state.boardRefreshing ? "刷新中" : `● ${remainText}s`;
+    elements.monitorBadge.className = `badge ${state.boardRefreshing ? "warning" : "live"} monitor-badge`;
+  }
+}
+
+function startCountdownTimer() {
+  if (state.countdownTimer) clearInterval(state.countdownTimer);
+  state.countdownTimer = setInterval(updateMonitorStatusBar, 1000);
+  updateMonitorStatusBar();
+}
+
+function renderLiveBoard(items) {
+  if (!elements.liveBoardBody) return;
+  state.liveBoardItems = items;
+
+  if (!items.length) {
+    elements.liveBoardBody.innerHTML =
+      '<tr><td colspan="8" class="empty-cell">添加自选股后开始实时盯盘</td></tr>';
+    return;
+  }
+
+  elements.liveBoardBody.innerHTML = items
+    .map((item) => {
+      const monitoring = item.monitoring || {};
+      const active = item.code === state.currentCode ? "active" : "";
+      const resonance = resonanceLabel(monitoring.resonance_level, monitoring.resonance_side);
+      return `
+        <tr class="live-board-row ${active}" data-code="${item.code}">
+          <td><strong>${item.code}</strong></td>
+          <td>${item.name}</td>
+          <td>${formatPrice(item.latest_price)}</td>
+          <td><span class="signal-pill ${signalClassMap[item.signal.key] || "hold"}">${item.signal.value}</span></td>
+          <td>${monitoring.trend_score ?? "-"}</td>
+          <td>${resonance}</td>
+          <td>${monitoring.adx == null ? "-" : Number(monitoring.adx).toFixed(0)}</td>
+          <td>${monitoring.momentum_resonance || "-"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  elements.liveBoardBody.querySelectorAll(".live-board-row").forEach((row) => {
+    row.addEventListener("click", () => selectStock(row.dataset.code));
+  });
+}
+
+function syncCurrentStockFromBoard(items) {
+  const current = items.find((item) => item.code === state.currentCode);
+  if (!current) return;
+
+  elements.latestPrice.textContent = formatPrice(current.latest_price);
+  elements.latestDate.textContent = `${current.price_label || "收盘价"} · ${current.latest_date}`;
+  elements.signalPill.textContent = current.signal.value;
+  elements.signalPill.className = `signal-pill ${signalClassMap[current.signal.key] || "hold"}`;
+  elements.scoreText.textContent = `${current.score >= 0 ? "+" : ""}${Number(current.score).toFixed(3)}`;
+  elements.scoreFill.style.width = scoreToWidth(current.score);
+  elements.scoreFill.style.background = scoreToColor(current.score);
+  renderMonitoringPanel(current.monitoring);
+  highlightActiveStock(state.currentCode);
+
+  if (state.syncChartOnMonitor) {
+    void loadAnalysis();
+  }
+}
+
+async function refreshLiveBoard({ detectChanges = false, silent = true, withWatchlist = true } = {}) {
+  if (!state.watchlistCodes.length) {
+    renderLiveBoard([]);
+    updateMonitorStatusBar();
+    return;
+  }
+
+  if (state.boardRefreshing) return;
+  state.boardRefreshing = true;
+  updateMonitorStatusBar();
+
+  const days = elements.daysSelect.value;
+  if (!silent) setStatus(detectChanges ? "正在刷新实时看板..." : "正在更新看板...");
+
+  try {
+    const payload = await api(
+      `/api/monitor/board?days=${days}&detect_changes=${detectChanges}`
+    );
+    const items = payload.items || [];
+    const signalAlerts = detectChanges
+      ? payload.alerts || detectSignalChanges(items, loadSignalSnapshot())
+      : [];
+    const resonanceAlerts = detectChanges ? collectResonanceAlerts(items) : [];
+
+    saveSignalSnapshot(items);
+    renderLiveBoard(items);
+    if (withWatchlist) {
+      renderWatchlist(items);
+    }
+    syncCurrentStockFromBoard(items);
+
+    if (detectChanges) {
+      renderAlerts(signalAlerts, resonanceAlerts);
+      notifySignalChanges(signalAlerts, resonanceAlerts);
+      if (!silent) {
+        const total = signalAlerts.length + resonanceAlerts.length;
+        setStatus(total ? `看板已更新，${total} 条新提醒` : "看板已更新，暂无新提醒");
+      }
+    } else if (!silent) {
+      setStatus(`看板已更新，共 ${items.length} 只自选股`);
+    }
+
+    state.lastBoardRefreshAt = payload.updated_at || new Date().toISOString();
+    scheduleNextRefresh();
+  } catch (error) {
+    if (!silent) setStatus(error.message, true);
+  } finally {
+    state.boardRefreshing = false;
+    updateMonitorStatusBar();
+  }
 }
 
 function startMonitorTimer() {
   stopMonitorTimer();
-  if (!state.monitorEnabled) return;
+  if (!state.monitorEnabled) {
+    updateMonitorStatusBar();
+    return;
+  }
+  scheduleNextRefresh();
+  startCountdownTimer();
   state.monitorTimer = setInterval(() => {
-    refreshWatchlist({ detectChanges: true, silent: true });
+    refreshLiveBoard({ detectChanges: true, silent: true, withWatchlist: true });
   }, state.monitorIntervalSec * 1000);
 }
 
@@ -1788,38 +1967,9 @@ async function loadAnalysis(retryCount = 0) {
 }
 
 async function refreshWatchlist({ detectChanges = false, silent = false, withCompare = false } = {}) {
-  if (!state.watchlistCodes.length) {
-    if (!silent) setStatus("请先添加自选股", true);
-    return;
-  }
-
-  const codes = state.watchlistCodes.join(",");
-  const days = elements.daysSelect.value;
-  if (!silent) setStatus(detectChanges ? "正在监控刷新..." : "正在批量分析...");
-
-  try {
-    const payload = await api(
-      `/api/batch?codes=${encodeURIComponent(codes)}&days=${days}&detect_changes=${detectChanges}`
-    );
-    const alerts = detectChanges ? payload.alerts || detectSignalChanges(payload.items, loadSignalSnapshot()) : [];
-    const resonanceAlerts = detectChanges ? collectResonanceAlerts(payload.items) : [];
-    saveSignalSnapshot(payload.items);
-    renderWatchlist(payload.items);
-    if (detectChanges) {
-      renderAlerts(alerts, resonanceAlerts);
-      notifySignalChanges(alerts, resonanceAlerts);
-      const total = alerts.length + resonanceAlerts.length;
-      if (!silent) {
-        setStatus(total ? `检测到 ${total} 条盯盘提醒` : "监控刷新完成，暂无新提醒");
-      }
-    } else if (!silent) {
-      setStatus(`批量分析完成，共 ${payload.items.length} 只股票（已保存到数据库）`);
-    }
-    if (withCompare || state.watchlistCodes.length >= 2) {
-      await loadCompareChart();
-    }
-  } catch (error) {
-    if (!silent) setStatus(error.message, true);
+  await refreshLiveBoard({ detectChanges, silent, withWatchlist: true });
+  if (withCompare || state.watchlistCodes.length >= 2) {
+    await loadCompareChart();
   }
 }
 
@@ -1859,8 +2009,14 @@ function bindEvents() {
   });
   elements.keepOnlyCurrentBtn.addEventListener("click", keepOnlyCurrentWatchlist);
   elements.monitorNowBtn.addEventListener("click", () => {
-    refreshWatchlist({ detectChanges: true, withCompare: true });
+    refreshLiveBoard({ detectChanges: true, silent: false, withWatchlist: true });
   });
+  if (elements.syncChartToggle) {
+    elements.syncChartToggle.addEventListener("change", (event) => {
+      state.syncChartOnMonitor = event.target.checked;
+      setStatus(state.syncChartOnMonitor ? "监控时将同步刷新当前股 K 线" : "监控时仅更新看板，不刷新 K 线");
+    });
+  }
   elements.compareBtn.addEventListener("click", loadCompareChart);
   elements.backtestBtn.addEventListener("click", loadBacktest);
   elements.insightBtn.addEventListener("click", loadInsight);
@@ -1963,10 +2119,12 @@ async function bootstrap() {
   }
   if (state.watchlistCodes.length) {
     try {
-      await refreshWatchlist({ detectChanges: false, silent: true, withCompare: false });
+      await refreshLiveBoard({ detectChanges: false, silent: true, withWatchlist: true });
     } catch (error) {
-      console.warn("自选股批量刷新失败", error);
+      console.warn("自选股看板刷新失败", error);
     }
+  } else {
+    updateMonitorStatusBar();
   }
 }
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -55,7 +56,7 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
     app = FastAPI(
         title="智能炒股",
         description="A 股智能分析 Web 面板",
-        version="0.3.0",
+        version="1.0.0",
         lifespan=lifespan,
     )
     app.state.demo = demo
@@ -104,6 +105,37 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
     @app.get("/api/alerts")
     async def api_alerts(limit: int = Query(50, ge=1, le=200)) -> dict:
         return list_alerts(limit=limit)
+
+    @app.get("/api/monitor/board")
+    async def api_monitor_board(
+        codes: str | None = Query(None, description="逗号分隔代码，留空则读取数据库自选股"),
+        days: int = Query(120, ge=30, le=365),
+        demo: bool | None = None,
+        detect_changes: bool = Query(True, description="检测信号变化并记录告警"),
+    ) -> dict:
+        """实时盯盘看板：批量分析自选股并返回告警。"""
+        use_demo = app.state.demo if demo is None else demo
+        if codes:
+            code_list = [item.strip() for item in codes.split(",") if item.strip()]
+        else:
+            code_list = get_watchlist().get("codes", [])
+        if not code_list:
+            return {
+                "items": [],
+                "alerts": [],
+                "codes": [],
+                "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                "demo": use_demo,
+            }
+        items = batch_analyze(code_list, days=days, demo=use_demo, allow_fallback=not use_demo)
+        alerts = record_batch(items, detect_changes=detect_changes)
+        return {
+            "items": items,
+            "alerts": alerts,
+            "codes": code_list,
+            "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "demo": use_demo,
+        }
 
     @app.get("/api/search")
     async def api_search(

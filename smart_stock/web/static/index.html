@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>智能炒股 · Web 面板</title>
+    <title>智能炒股 · 实时盯盘面板</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="/static/vendor/chart.umd.min.js"></script>
     <script src="/static/vendor/hammer.min.js"></script>
@@ -13,10 +13,13 @@
     <div class="container">
       <header class="hero">
         <div>
-          <h1>智能炒股</h1>
-          <p>多因子技术指标分析 · K 线可视化 · 交易信号面板</p>
+          <h1>智能炒股 · 实时盯盘面板</h1>
+          <p>K 线 · 多因子指标 · 自选股监控 · SQLite 持久化 · 一体化看板</p>
         </div>
-        <div class="badge" id="modeBadge">模式加载中...</div>
+        <div class="hero-badges">
+          <div class="badge" id="modeBadge">模式加载中...</div>
+          <div class="badge monitor-badge" id="monitorBadge">监控初始化...</div>
+        </div>
       </header>
 
       <section class="panel">
@@ -32,6 +35,48 @@
         </div>
 
         <div class="status" id="statusText"></div>
+
+        <div class="panel live-dashboard">
+          <div class="dashboard-toolbar">
+            <div>
+              <h3>实时盯盘看板</h3>
+              <p class="chart-hint" id="monitorStatusText">加载自选股后自动刷新，可边看 K 线边监控</p>
+            </div>
+            <div class="dashboard-actions">
+              <label class="toggle">
+                <input id="syncChartToggle" type="checkbox" />
+                <span>监控时同步刷新当前股 K 线</span>
+              </label>
+              <button class="secondary small" id="monitorNowBtn" type="button">立即刷新看板</button>
+            </div>
+          </div>
+          <div class="dashboard-grid">
+            <div class="live-board-wrap">
+              <table class="live-board-table">
+                <thead>
+                  <tr>
+                    <th>代码</th>
+                    <th>名称</th>
+                    <th>现价</th>
+                    <th>信号</th>
+                    <th>趋势</th>
+                    <th>共振</th>
+                    <th>ADX</th>
+                    <th>动量</th>
+                  </tr>
+                </thead>
+                <tbody id="liveBoardBody">
+                  <tr>
+                    <td colspan="8" class="empty-cell">添加自选股后开始实时盯盘</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="alert-feed" id="alertPanel">
+              <div class="empty">暂无盯盘提醒</div>
+            </div>
+          </div>
+        </div>
 
         <div class="layout">
           <aside class="sidebar">
@@ -146,7 +191,7 @@
                 <button class="secondary small" id="clearWatchBtn" type="button">清空自选</button>
               </div>
               <p class="watch-note">自选股与监控设置保存在本地 SQLite 数据库；点击代码旁 × 可删除</p>
-              <div class="monitor-controls">
+              <div class="monitor-controls compact-monitor">
                 <label class="toggle">
                   <input id="monitorToggle" type="checkbox" checked />
                   <span>自动监控</span>
@@ -156,15 +201,11 @@
                   <option value="60" selected>60 秒</option>
                   <option value="300">5 分钟</option>
                 </select>
-                <button class="secondary small" id="monitorNowBtn" type="button">立即刷新</button>
               </div>
               <label class="toggle notify-toggle">
                 <input id="notifyToggle" type="checkbox" />
                 <span>信号变化浏览器通知</span>
               </label>
-              <div class="alert-panel" id="alertPanel">
-                <div class="empty">暂无信号变化告警</div>
-              </div>
               <div class="watchlist" id="watchlist">
                 <div class="empty">点击批量分析查看结果</div>
               </div>

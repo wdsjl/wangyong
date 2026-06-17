@@ -80,6 +80,132 @@ a {
   color: #fde68a;
 }
 
+.hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.monitor-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+.live-dashboard {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  background: linear-gradient(180deg, rgba(17, 26, 46, 0.98), rgba(15, 23, 42, 0.92));
+}
+
+.dashboard-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.dashboard-toolbar h3 {
+  margin: 0 0 4px;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.9fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.live-board-wrap {
+  overflow: auto;
+  max-height: 320px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.live-board-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.live-board-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.live-board-table th,
+.live-board-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  white-space: nowrap;
+}
+
+.live-board-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.live-board-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.live-board-row:hover {
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.live-board-row.active {
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.live-board-row.active td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.live-board-table .signal-pill {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
+
+.empty-cell {
+  text-align: center;
+  color: var(--muted);
+  padding: 28px 12px !important;
+}
+
+.alert-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.alert-feed .empty {
+  padding: 48px 12px;
+}
+
+.compact-monitor {
+  margin-top: 4px;
+}
+
 #stockTitle .badge {
   margin-left: 8px;
   padding: 4px 10px;
@@ -699,5 +825,17 @@ button.small {
 
   .toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    flex-direction: column;
+  }
+
+  .hero-badges {
+    justify-content: flex-start;
   }
 }
