@@ -2,30 +2,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from smart_stock.analysis_builder import attach_monitoring
 from smart_stock.analyzer import analyze_many
-from smart_stock.config import (
-    DEFAULT_INDICATOR_CONFIG,
-    DEFAULT_STRATEGY_CONFIG,
-    IndicatorConfig,
-    StrategyConfig,
-)
+from smart_stock.config import DEFAULT_INDICATOR_CONFIG, IndicatorConfig
 from smart_stock.data import (
     DataFetchError,
     attach_live_spot_price,
     fetch_daily_bars_safe,
+    fetch_intraday_bars_safe,
     get_stock_name,
     normalize_code,
     search_stock,
 )
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
+from smart_stock.intraday import intraday_to_chart, latest_intraday_snapshot
 from smart_stock.models import AnalysisResult
 from smart_stock.backtest import BacktestConfig, run_backtest
 from smart_stock.llm_insight import generate_insight
 from smart_stock.serializers import analysis_to_dict, backtest_to_dict, dataframe_to_chart
+from smart_stock.store import get_strategy_settings
 from smart_stock.strategy import compute_trade_markers, generate_signal
+from smart_stock.strategy_profile import StrategyProfile
 
 
 @dataclass
@@ -35,15 +34,24 @@ class StockDetail:
     data_source: str = "live"
 
 
+def load_strategy_profile() -> StrategyProfile:
+    try:
+        return StrategyProfile.from_dict(get_strategy_settings())
+    except Exception:
+        return StrategyProfile()
+
+
 def get_stock_detail(
     code: str,
     days: int | None = None,
     demo: bool = False,
     allow_fallback: bool = False,
     indicator_config: IndicatorConfig = DEFAULT_INDICATOR_CONFIG,
-    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    profile: StrategyProfile | None = None,
 ) -> StockDetail:
     """获取单只股票的完整分析详情与图表数据。"""
+    active_profile = profile or load_strategy_profile()
+    strategy_config = active_profile.strategy
     normalized_code = normalize_code(code)
     lookback_days = days or strategy_config.lookback_days
 
@@ -56,7 +64,21 @@ def get_stock_detail(
     use_demo_names = demo or data_source != "live"
     enriched = enrich_indicators(bars, indicator_config)
     indicators = latest_indicator_snapshot(enriched)
-    signal, score, reasons = generate_signal(enriched, indicators, strategy_config)
+    signal, score, reasons = generate_signal(
+        enriched,
+        indicators,
+        strategy_config,
+        weights=active_profile.weights,
+        use_ama_trend=active_profile.use_ama_trend,
+    )
+
+    intraday_bars, _ = fetch_intraday_bars_safe(
+        normalized_code,
+        period="5m",
+        bars=48,
+        demo=use_demo_names,
+        allow_fallback=allow_fallback,
+    )
 
     latest = enriched.iloc[-1]
     analysis = AnalysisResult(
@@ -83,13 +105,39 @@ def get_stock_detail(
         enriched,
         data_source=data_source,
         demo=use_demo_names,
-        strategy_config=strategy_config,
+        profile=active_profile,
+        intraday_df=intraday_bars,
     )
     chart = dataframe_to_chart(enriched)
-    markers = compute_trade_markers(enriched)
+    markers = compute_trade_markers(enriched, profile=active_profile)
     chart["buy_markers"] = markers["buy_markers"]
     chart["sell_markers"] = markers["sell_markers"]
     return StockDetail(analysis=analysis, chart=chart, data_source=data_source)
+
+
+def get_intraday_detail(
+    code: str,
+    period: str = "5m",
+    bars: int = 48,
+    demo: bool = False,
+    allow_fallback: bool = False,
+) -> dict:
+    normalized_code = normalize_code(code)
+    bars_df, data_source = fetch_intraday_bars_safe(
+        normalized_code,
+        period=period,
+        bars=bars,
+        demo=demo,
+        allow_fallback=allow_fallback,
+    )
+    snapshot = latest_intraday_snapshot(bars_df)
+    return {
+        "code": normalized_code,
+        "period": period,
+        "snapshot": asdict(snapshot) if hasattr(snapshot, "__dataclass_fields__") else snapshot,
+        "chart": intraday_to_chart(bars_df),
+        "data_source": data_source,
+    }
 
 
 def search_stocks(keyword: str, limit: int = 10, demo: bool = False) -> list[dict[str, str]]:

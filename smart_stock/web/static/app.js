@@ -25,6 +25,10 @@ const state = {
   lastBoardRefreshAt: null,
   nextRefreshAt: null,
   boardRefreshing: false,
+  showAma: true,
+  intradayPeriod: "5m",
+  intradayChart: null,
+  strategyProfile: null,
 };
 
 const elements = {
@@ -91,6 +95,32 @@ const elements = {
   monitorBadge: document.getElementById("monitorBadge"),
   liveBoardBody: document.getElementById("liveBoardBody"),
   syncChartToggle: document.getElementById("syncChartToggle"),
+  amaSignalText: document.getElementById("amaSignalText"),
+  amaValueText: document.getElementById("amaValueText"),
+  vixText: document.getElementById("vixText"),
+  vixTrendText: document.getElementById("vixTrendText"),
+  sectorText: document.getElementById("sectorText"),
+  sectorChangeText: document.getElementById("sectorChangeText"),
+  intradayMomentumText: document.getElementById("intradayMomentumText"),
+  intradayVwapText: document.getElementById("intradayVwapText"),
+  saveStrategyBtn: document.getElementById("saveStrategyBtn"),
+  buyThreshold: document.getElementById("buyThreshold"),
+  sellThreshold: document.getElementById("sellThreshold"),
+  adxTrendThreshold: document.getElementById("adxTrendThreshold"),
+  adxRangeThreshold: document.getElementById("adxRangeThreshold"),
+  atrStopMultiplier: document.getElementById("atrStopMultiplier"),
+  vixCautionThreshold: document.getElementById("vixCautionThreshold"),
+  weightTrend: document.getElementById("weightTrend"),
+  weightMomentum: document.getElementById("weightMomentum"),
+  weightVolatility: document.getElementById("weightVolatility"),
+  weightVolume: document.getElementById("weightVolume"),
+  weightObv: document.getElementById("weightObv"),
+  useAmaTrendToggle: document.getElementById("useAmaTrendToggle"),
+  showAmaToggle: document.getElementById("showAmaToggle"),
+  intradayPeriod: document.getElementById("intradayPeriod"),
+  refreshIntradayBtn: document.getElementById("refreshIntradayBtn"),
+  intradaySummary: document.getElementById("intradaySummary"),
+  intradayChart: document.getElementById("intradayChart"),
 };
 
 const signalClassMap = {
@@ -131,6 +161,8 @@ const chartColors = {
   kdjK: "#f472b6",
   kdjD: "#a78bfa",
   kdjJ: "#fbbf24",
+  ama: "#fb923c",
+  vwap: "#e879f9",
   crosshair: "rgba(148, 163, 184, 0.55)",
 };
 
@@ -730,7 +762,7 @@ function renderLiveBoard(items) {
 
   if (!items.length) {
     elements.liveBoardBody.innerHTML =
-      '<tr><td colspan="8" class="empty-cell">添加自选股后开始实时盯盘</td></tr>';
+      '<tr><td colspan="11" class="empty-cell">添加自选股后开始实时盯盘</td></tr>';
     return;
   }
 
@@ -739,6 +771,8 @@ function renderLiveBoard(items) {
       const monitoring = item.monitoring || {};
       const active = item.code === state.currentCode ? "active" : "";
       const resonance = resonanceLabel(monitoring.resonance_level, monitoring.resonance_side);
+      const vix = monitoring.vix || {};
+      const sector = monitoring.sector || {};
       return `
         <tr class="live-board-row ${active}" data-code="${item.code}">
           <td><strong>${item.code}</strong></td>
@@ -749,6 +783,9 @@ function renderLiveBoard(items) {
           <td>${resonance}</td>
           <td>${monitoring.adx == null ? "-" : Number(monitoring.adx).toFixed(0)}</td>
           <td>${monitoring.momentum_resonance || "-"}</td>
+          <td>${vix.index_value == null ? "-" : vix.index_value}</td>
+          <td>${sector.sector_name ? `${sector.sector_name} ${sector.change_pct ?? ""}%` : "-"}</td>
+          <td>${monitoring.ama_signal || "-"}</td>
         </tr>
       `;
     })
@@ -1122,6 +1159,31 @@ function renderMonitoringPanel(monitoring) {
     elements.northboundText.textContent = "北向数据暂无";
   }
 
+  if (elements.amaSignalText) {
+    elements.amaSignalText.textContent = monitoring.ama_signal || "--";
+  }
+
+  const vix = monitoring.vix || {};
+  if (elements.vixText) {
+    elements.vixText.textContent = vix.index_value == null ? "--" : `${vix.index_value} ${vix.label || ""}`;
+    elements.vixTrendText.textContent = vix.realized_vol != null ? `波动 ${vix.realized_vol}% · ${vix.trend || ""}` : "--";
+  }
+
+  const sector = monitoring.sector || {};
+  if (elements.sectorText) {
+    elements.sectorText.textContent = sector.sector_name ? `${sector.sector_name} ${sector.sentiment_label || ""}` : "--";
+    elements.sectorChangeText.textContent =
+      sector.change_pct != null ? `涨跌 ${sector.change_pct}% · 上涨家数比 ${sector.up_ratio ?? "-"}%` : "--";
+  }
+
+  const intraday = monitoring.intraday || {};
+  if (elements.intradayMomentumText) {
+    elements.intradayMomentumText.textContent = intraday.momentum_label || "--";
+    elements.intradayVwapText.textContent = intraday.vwap_signal
+      ? `${intraday.vwap_signal} · RSI ${intraday.rsi ?? "-"}`
+      : "--";
+  }
+
   const alerts = monitoring.alerts || [];
   if (!alerts.length) {
     elements.inlineAlerts.innerHTML = '<li class="muted">暂无即时预警</li>';
@@ -1159,6 +1221,9 @@ function renderAnalysis(payload) {
   elements.reasonList.innerHTML = analysis.reasons.map((item) => `<li>${item}</li>`).join("");
   elements.riskNote.textContent = analysis.risk_note;
   renderMonitoringPanel(analysis.monitoring);
+  if (elements.amaValueText && analysis.indicators?.ama != null) {
+    elements.amaValueText.textContent = `AMA ${formatPrice(analysis.indicators.ama)}`;
+  }
 
   const indicators = analysis.indicators || {};
   const metricItems = [
@@ -1177,6 +1242,7 @@ function renderAnalysis(payload) {
     ["WR", indicators.wr],
     ["MFI", indicators.mfi],
     ["ADX", indicators.adx],
+    ["AMA", indicators.ama],
     ["MACD", indicators.macd],
     ["MACD 柱", indicators.macd_hist],
   ];
@@ -1193,6 +1259,136 @@ function renderAnalysis(payload) {
     .join("");
 
   requestAnimationFrame(() => renderCharts());
+  void loadIntradayChart();
+}
+
+function fillStrategyForm(profile) {
+  if (!profile || !elements.buyThreshold) return;
+  const strategy = profile.strategy || {};
+  const weights = profile.weights || {};
+  elements.buyThreshold.value = strategy.buy_threshold ?? 0.6;
+  elements.sellThreshold.value = strategy.sell_threshold ?? -0.6;
+  elements.adxTrendThreshold.value = strategy.adx_trend_threshold ?? 25;
+  elements.adxRangeThreshold.value = strategy.adx_range_threshold ?? 20;
+  elements.atrStopMultiplier.value = strategy.atr_stop_multiplier ?? 2;
+  elements.vixCautionThreshold.value = profile.vix_caution_threshold ?? 65;
+  elements.weightTrend.value = weights.trend ?? 1;
+  elements.weightMomentum.value = weights.momentum ?? 1;
+  elements.weightVolatility.value = weights.volatility ?? 1;
+  elements.weightVolume.value = weights.volume ?? 1;
+  elements.weightObv.value = weights.obv ?? 1;
+  if (elements.useAmaTrendToggle) {
+    elements.useAmaTrendToggle.checked = profile.use_ama_trend !== false;
+  }
+}
+
+function readStrategyForm() {
+  return {
+    strategy: {
+      buy_threshold: Number(elements.buyThreshold?.value || 0.6),
+      sell_threshold: Number(elements.sellThreshold?.value || -0.6),
+      adx_trend_threshold: Number(elements.adxTrendThreshold?.value || 25),
+      adx_range_threshold: Number(elements.adxRangeThreshold?.value || 20),
+      atr_stop_multiplier: Number(elements.atrStopMultiplier?.value || 2),
+    },
+    resonance: (state.strategyProfile && state.strategyProfile.resonance) || {},
+    weights: {
+      trend: Number(elements.weightTrend?.value || 1),
+      momentum: Number(elements.weightMomentum?.value || 1),
+      volatility: Number(elements.weightVolatility?.value || 1),
+      volume: Number(elements.weightVolume?.value || 1),
+      obv: Number(elements.weightObv?.value || 1),
+    },
+    use_ama_trend: elements.useAmaTrendToggle?.checked !== false,
+    vix_caution_threshold: Number(elements.vixCautionThreshold?.value || 65),
+  };
+}
+
+async function loadStrategySettings() {
+  try {
+    const payload = await api("/api/strategy-settings");
+    state.strategyProfile = payload;
+    fillStrategyForm(payload);
+  } catch (error) {
+    console.warn("策略配置加载失败", error);
+  }
+}
+
+async function saveStrategySettings() {
+  const payload = readStrategyForm();
+  try {
+    const saved = await api("/api/strategy-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.strategyProfile = saved;
+    fillStrategyForm(saved);
+    setStatus("策略配置已保存，请重新点击「分析」生效");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function loadIntradayChart() {
+  const code = state.currentCode;
+  if (!code || !elements.intradayChart) return;
+  const period = elements.intradayPeriod?.value || state.intradayPeriod;
+  state.intradayPeriod = period;
+  elements.intradaySummary.textContent = `正在加载 ${code} 分时 (${period})...`;
+  try {
+    const payload = await api(`/api/intraday/${encodeURIComponent(code)}?period=${period}&bars=48`);
+    const chart = payload.chart || {};
+    const snapshot = payload.snapshot || {};
+    elements.intradaySummary.textContent = `${code} ${snapshot.latest_time || ""} · 价 ${formatPrice(snapshot.latest_price)} · ${snapshot.trend_label || ""} · ${snapshot.vwap_signal || ""}`;
+    renderIntradayChart(chart);
+  } catch (error) {
+    elements.intradaySummary.textContent = `分时加载失败：${error.message}`;
+    destroyChart(state.intradayChart);
+    state.intradayChart = null;
+  }
+}
+
+function renderIntradayChart(chart) {
+  destroyChart(state.intradayChart);
+  const ctx = releaseCanvas("intradayChart");
+  if (!ctx || !chart.times?.length) return;
+  state.intradayChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: chart.times,
+      datasets: [
+        { ...buildLineDataset("价格", chart.close, chartColors.close), order: 1 },
+        { ...buildLineDataset("VWAP", chart.vwap, chartColors.vwap, true), order: 2 },
+        {
+          ...buildLineDataset("RSI", chart.rsi, chartColors.rsi, true),
+          order: 3,
+          yAxisID: "y1",
+        },
+      ],
+    },
+    options: baseChartOptions({
+      scales: {
+        x: {
+          type: "category",
+          ticks: { color: "#94a3b8", maxTicksLimit: 8 },
+          grid: { color: "rgba(148, 163, 184, 0.08)" },
+        },
+        y: {
+          position: "left",
+          ticks: { color: "#94a3b8" },
+          grid: { color: "rgba(148, 163, 184, 0.08)" },
+        },
+        y1: {
+          position: "right",
+          min: 0,
+          max: 100,
+          ticks: { color: "#c084fc" },
+          grid: { drawOnChartArea: false },
+        },
+      },
+    }),
+  });
 }
 
 function renderWatchlist(items) {
@@ -1333,7 +1529,7 @@ function baseChartOptions(extra = {}) {
 }
 
 function buildPriceChartDatasets(chart) {
-  return [
+  const datasets = [
     {
       label: "K线",
       data: chart.close,
@@ -1348,6 +1544,10 @@ function buildPriceChartDatasets(chart) {
     { ...buildLineDataset("MA20", chart.ma20, chartColors.ma20), order: 3 },
     { ...buildLineDataset("MA60", chart.ma60, chartColors.ma60), order: 4 },
   ];
+  if (state.showAma && chart.ama) {
+    datasets.push({ ...buildLineDataset("AMA", chart.ama, chartColors.ama, true), order: 0 });
+  }
+  return datasets;
 }
 
 function createPriceChart(ctx, chart) {
@@ -2011,6 +2211,22 @@ function bindEvents() {
   elements.monitorNowBtn.addEventListener("click", () => {
     refreshLiveBoard({ detectChanges: true, silent: false, withWatchlist: true });
   });
+  if (elements.saveStrategyBtn) {
+    elements.saveStrategyBtn.addEventListener("click", saveStrategySettings);
+  }
+  if (elements.refreshIntradayBtn) {
+    elements.refreshIntradayBtn.addEventListener("click", loadIntradayChart);
+  }
+  if (elements.intradayPeriod) {
+    elements.intradayPeriod.addEventListener("change", loadIntradayChart);
+  }
+  if (elements.showAmaToggle) {
+    elements.showAmaToggle.addEventListener("change", (event) => {
+      state.showAma = event.target.checked;
+      rerenderPriceChart();
+      setStatus(state.showAma ? "已显示 AMA 自适应均线" : "已隐藏 AMA");
+    });
+  }
   if (elements.syncChartToggle) {
     elements.syncChartToggle.addEventListener("change", (event) => {
       state.syncChartOnMonitor = event.target.checked;
@@ -2100,6 +2316,11 @@ async function bootstrap() {
     elements.monitorInterval.value = String(state.monitorIntervalSec);
     elements.notifyToggle.checked = state.notifyEnabled;
     startMonitorTimer();
+  }
+  try {
+    await loadStrategySettings();
+  } catch (error) {
+    console.warn("策略配置加载失败", error);
   }
   try {
     await loadConfig();

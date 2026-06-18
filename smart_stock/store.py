@@ -76,3 +76,14 @@ def list_alerts(limit: int = 50) -> dict[str, Any]:
 
 def record_analysis(payload: dict[str, Any], *, data_source: str = "live") -> None:
     db.save_analysis_history(payload, data_source=data_source)
+
+
+def get_strategy_settings() -> dict[str, Any]:
+    return db.get_strategy_settings()
+
+
+def put_strategy_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    from smart_stock.strategy_profile import StrategyProfile
+
+    profile = StrategyProfile.from_dict(payload)
+    return db.save_strategy_settings(profile.to_dict())

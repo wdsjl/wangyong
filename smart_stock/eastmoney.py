@@ -14,7 +14,15 @@ SPOT_URL = "https://push2.eastmoney.com/api/qt/stock/get"
 SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
 SUGGEST_TOKEN = "D43BF5C8E79E06BEE2A6F6E3E8C4B5"
 
-PERIOD_MAP = {"daily": "101", "weekly": "102", "monthly": "103"}
+PERIOD_MAP = {
+    "daily": "101",
+    "weekly": "102",
+    "monthly": "103",
+    "5m": "5",
+    "15m": "15",
+    "30m": "30",
+    "60m": "60",
+}
 ADJUST_MAP = {"qfq": "1", "hfq": "2", "": "0"}
 
 KLINE_COLUMNS = [
@@ -103,6 +111,75 @@ def to_secid(code: str) -> str:
     code = "".join(ch for ch in code if ch.isdigit()).zfill(6)
     market = "1" if code.startswith("6") else "0"
     return f"{market}.{code}"
+
+
+@dataclass
+class SectorQuote:
+    change_pct: float
+    up_ratio: float
+    sentiment_score: int
+    sentiment_label: str
+
+
+SECTOR_URL = "https://push2.eastmoney.com/api/qt/stock/get"
+
+
+def fetch_sector_quote(sector_code: str) -> SectorQuote | None:
+    """拉取东方财富板块指数涨跌（用于板块情绪）。"""
+    if not sector_code:
+        return None
+    market = "90"
+    payload = direct_http_get_json(
+        SECTOR_URL,
+        params={
+            "fltt": "2",
+            "invt": "2",
+            "fields": "f3,f104,f105,f106",
+            "secid": f"{market}.{sector_code}",
+        },
+    )
+    data = payload.get("data") or {}
+    try:
+        change_pct = float(data.get("f3"))
+    except (TypeError, ValueError):
+        return None
+    up_count = int(data.get("f104") or 0)
+    down_count = int(data.get("f105") or 0)
+    flat_count = int(data.get("f106") or 0)
+    total = up_count + down_count + flat_count
+    up_ratio = round(up_count / total * 100, 1) if total > 0 else 50.0
+    sentiment_score = int(round(50 + change_pct * 8 + (up_ratio - 50) * 0.3))
+    sentiment_score = max(0, min(100, sentiment_score))
+    if sentiment_score >= 65:
+        label = "板块偏强"
+    elif sentiment_score <= 35:
+        label = "板块偏弱"
+    else:
+        label = "板块中性"
+    return SectorQuote(
+        change_pct=round(change_pct, 2),
+        up_ratio=up_ratio,
+        sentiment_score=sentiment_score,
+        sentiment_label=label,
+    )
+
+
+def fetch_intraday_bars(code: str, period: str = "5m", bars: int = 48) -> pd.DataFrame:
+    """拉取分时/分钟 K 线。"""
+    if period not in PERIOD_MAP:
+        raise ValueError(f"不支持的周期: {period}")
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=5 if period in {"5m", "15m"} else 10)
+    raw = fetch_kline(
+        code=code,
+        start_date=start_date.strftime("%Y%m%d"),
+        end_date=end_date.strftime("%Y%m%d"),
+        period=period,
+        adjust="",
+    )
+    if raw.empty:
+        return pd.DataFrame()
+    return raw.tail(bars).reset_index(drop=True)
 
 
 def fetch_kline(

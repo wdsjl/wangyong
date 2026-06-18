@@ -18,16 +18,20 @@ from smart_stock.service import (
     check_live_data_available,
     compare_stocks,
     detail_to_dict,
+    get_intraday_detail,
     get_stock_detail,
+    load_strategy_profile,
     search_stocks,
     stock_insight,
 )
 from smart_stock.store import (
     get_monitor_settings,
+    get_strategy_settings,
     get_watchlist,
     init_store,
     list_alerts,
     put_monitor_settings,
+    put_strategy_settings,
     put_watchlist,
     record_analysis,
     record_batch,
@@ -46,6 +50,14 @@ class MonitorSettingsPayload(BaseModel):
     notify_enabled: bool = False
 
 
+class StrategySettingsPayload(BaseModel):
+    strategy: dict = Field(default_factory=dict)
+    resonance: dict = Field(default_factory=dict)
+    weights: dict = Field(default_factory=dict)
+    use_ama_trend: bool = True
+    vix_caution_threshold: int = Field(65, ge=10, le=95)
+
+
 def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI:
     resolved_db = init_store(db_path)
 
@@ -56,7 +68,7 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
     app = FastAPI(
         title="智能炒股",
         description="A 股智能分析 Web 面板",
-        version="1.0.0",
+        version="1.2.0",
         lifespan=lifespan,
     )
     app.state.demo = demo
@@ -105,6 +117,33 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
     @app.get("/api/alerts")
     async def api_alerts(limit: int = Query(50, ge=1, le=200)) -> dict:
         return list_alerts(limit=limit)
+
+    @app.get("/api/strategy-settings")
+    async def api_get_strategy_settings() -> dict:
+        return get_strategy_settings()
+
+    @app.put("/api/strategy-settings")
+    async def api_put_strategy_settings(payload: StrategySettingsPayload) -> dict:
+        return put_strategy_settings(payload.model_dump())
+
+    @app.get("/api/intraday/{code}")
+    async def api_intraday(
+        code: str,
+        period: str = Query("5m", pattern="^(5m|15m|30m|60m)$"),
+        bars: int = Query(48, ge=12, le=240),
+        demo: bool | None = None,
+    ) -> dict:
+        use_demo = app.state.demo if demo is None else demo
+        try:
+            return get_intraday_detail(
+                code,
+                period=period,
+                bars=bars,
+                demo=use_demo,
+                allow_fallback=not use_demo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/monitor/board")
     async def api_monitor_board(
@@ -160,6 +199,7 @@ def create_app(demo: bool = False, db_path: str | Path | None = None) -> FastAPI
                 days=days,
                 demo=use_demo,
                 allow_fallback=not use_demo,
+                profile=load_strategy_profile(),
             )
         except Exception as exc:  # noqa: BLE001 - 统一转换为 HTTP 错误
             raise HTTPException(status_code=400, detail=str(exc)) from exc

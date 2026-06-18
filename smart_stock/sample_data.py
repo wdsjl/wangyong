@@ -65,3 +65,36 @@ def generate_demo_bars(code: str, days: int = 120, seed: int | None = None) -> p
             "amount": np.round(volume * close, 2),
         }
     )
+
+
+def generate_demo_intraday(code: str, period: str = "5m", bars: int = 48, seed: int | None = None) -> pd.DataFrame:
+    """生成演示分时 K 线。"""
+    if seed is None:
+        seed = sum(ord(ch) for ch in f"{code}:{period}")
+
+    rng = np.random.default_rng(seed)
+    base_price = STOCK_BASE_PRICES.get(code, 50 + (seed % 500))
+    minutes_per_bar = int("".join(ch for ch in period if ch.isdigit()) or "5")
+
+    end = pd.Timestamp.now().replace(second=0, microsecond=0)
+    start_minute = end - pd.Timedelta(minutes=minutes_per_bar * (bars - 1))
+    dates = pd.date_range(start=start_minute, end=end, freq=f"{minutes_per_bar}min")
+
+    returns = rng.normal(0, 0.0015, size=len(dates))
+    close = base_price * np.cumprod(1 + returns)
+    open_price = close * (1 + rng.normal(0, 0.0008, size=len(dates)))
+    high = np.maximum(open_price, close) * (1 + rng.uniform(0, 0.002, size=len(dates)))
+    low = np.minimum(open_price, close) * (1 - rng.uniform(0, 0.002, size=len(dates)))
+    volume = rng.integers(5_000, 120_000, size=len(dates))
+
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "open": np.round(open_price, 2),
+            "close": np.round(close, 2),
+            "high": np.round(high, 2),
+            "low": np.round(low, 2),
+            "volume": volume,
+            "amount": np.round(volume * close, 2),
+        }
+    )

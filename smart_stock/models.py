@@ -41,6 +41,41 @@ class IndicatorSnapshot:
     adx: float | None = None
     plus_di: float | None = None
     minus_di: float | None = None
+    ama: float | None = None
+
+
+@dataclass
+class VixSnapshot:
+    index_value: int | None = None
+    realized_vol: float | None = None
+    label: str = "未知"
+    trend: str = "平稳"
+    source: str = "unavailable"
+
+
+@dataclass
+class SectorSnapshot:
+    sector_name: str = "未知板块"
+    sector_code: str = ""
+    change_pct: float | None = None
+    up_ratio: float | None = None
+    sentiment_score: int = 50
+    sentiment_label: str = "板块中性"
+    source: str = "unavailable"
+
+
+@dataclass
+class IntradaySnapshot:
+    latest_price: float | None = None
+    latest_time: str = "--"
+    rsi: float | None = None
+    macd_hist: float | None = None
+    vwap: float | None = None
+    vwap_signal: str = "未知"
+    momentum_label: str = "未知"
+    trend_label: str = "震荡"
+    bar_count: int = 0
+    source: str = "unavailable"
 
 
 @dataclass
@@ -100,6 +135,10 @@ class MonitoringSnapshot:
     chip: ChipSnapshot | None = None
     fundamentals: FundamentalSnapshot | None = None
     northbound: NorthboundSnapshot | None = None
+    vix: VixSnapshot | None = None
+    sector: SectorSnapshot | None = None
+    intraday: IntradaySnapshot | None = None
+    ama_signal: str = "未知"
     alerts: list[dict[str, str]] = field(default_factory=list)
     money_flow: MoneyFlowSnapshot | None = None
 

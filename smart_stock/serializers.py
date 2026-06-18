@@ -35,6 +35,12 @@ def monitoring_to_dict(monitoring: MonitoringSnapshot | None) -> dict[str, Any]:
         payload["fundamentals"] = asdict(monitoring.fundamentals)
     if monitoring.northbound is not None:
         payload["northbound"] = asdict(monitoring.northbound)
+    if monitoring.vix is not None:
+        payload["vix"] = asdict(monitoring.vix)
+    if monitoring.sector is not None:
+        payload["sector"] = asdict(monitoring.sector)
+    if monitoring.intraday is not None:
+        payload["intraday"] = asdict(monitoring.intraday)
     return payload
 
 
@@ -89,6 +95,7 @@ def dataframe_to_chart(df: pd.DataFrame) -> dict[str, list[Any]]:
         "adx",
         "plus_di",
         "minus_di",
+        "ama",
     ]
 
     payload: dict[str, list[Any]] = {"dates": []}

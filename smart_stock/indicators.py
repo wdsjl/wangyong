@@ -143,6 +143,35 @@ def add_mfi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     return result
 
 
+def add_ama(df: pd.DataFrame, period: int = 10, fast: int = 2, slow: int = 30) -> pd.DataFrame:
+    """Kaufman 自适应均线 (AMA)。"""
+    result = df.copy()
+    change = (result["close"] - result["close"].shift(period)).abs()
+    volatility = result["close"].diff().abs().rolling(window=period, min_periods=period).sum()
+    er = change / volatility.replace(0, np.nan)
+    er = er.fillna(0).clip(0, 1)
+    fast_sc = 2 / (fast + 1)
+    slow_sc = 2 / (slow + 1)
+    sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
+
+    ama = pd.Series(np.nan, index=result.index, dtype=float)
+    first_valid = sc.first_valid_index()
+    if first_valid is None:
+        result["ama"] = ama
+        return result
+
+    start_pos = result.index.get_loc(first_valid)
+    ama.iloc[start_pos] = float(result.iloc[start_pos]["close"])
+    for i in range(start_pos + 1, len(result)):
+        prev = ama.iloc[i - 1]
+        if pd.isna(prev):
+            ama.iloc[i] = float(result.iloc[i]["close"])
+        else:
+            ama.iloc[i] = prev + sc.iloc[i] * (float(result.iloc[i]["close"]) - prev)
+    result["ama"] = ama
+    return result
+
+
 def add_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     result = df.copy()
     up_move = result["high"].diff()
@@ -197,6 +226,7 @@ def enrich_indicators(
     enriched = add_wr(enriched, config.wr_period)
     enriched = add_mfi(enriched, config.mfi_period)
     enriched = add_adx(enriched, config.adx_period)
+    enriched = add_ama(enriched, config.ama_period, config.ama_fast, config.ama_slow)
     return enriched
 
 
@@ -231,6 +261,7 @@ def latest_indicator_snapshot(df: pd.DataFrame) -> IndicatorSnapshot:
         adx=_safe_float(row.get("adx")),
         plus_di=_safe_float(row.get("plus_di")),
         minus_di=_safe_float(row.get("minus_di")),
+        ama=_safe_float(row.get("ama")),
     )
 
 

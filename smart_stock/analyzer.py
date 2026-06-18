@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from smart_stock.analysis_builder import attach_monitoring
-from smart_stock.config import (
-    DEFAULT_INDICATOR_CONFIG,
-    DEFAULT_STRATEGY_CONFIG,
-    IndicatorConfig,
-    StrategyConfig,
-)
+from smart_stock.config import DEFAULT_INDICATOR_CONFIG, IndicatorConfig
+from smart_stock.store import get_strategy_settings
+from smart_stock.strategy_profile import StrategyProfile
+from smart_stock.strategy import generate_signal
 from smart_stock.data import (
     DataFetchError,
     attach_live_spot_price,
@@ -19,7 +17,13 @@ from smart_stock.data import (
 )
 from smart_stock.indicators import enrich_indicators, latest_indicator_snapshot
 from smart_stock.models import AnalysisResult, Signal
-from smart_stock.strategy import generate_signal
+
+
+def _load_profile() -> StrategyProfile:
+    try:
+        return StrategyProfile.from_dict(get_strategy_settings())
+    except Exception:
+        return StrategyProfile()
 
 
 def analyze_stock(
@@ -28,9 +32,11 @@ def analyze_stock(
     demo: bool = False,
     allow_fallback: bool = False,
     indicator_config: IndicatorConfig = DEFAULT_INDICATOR_CONFIG,
-    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    profile: StrategyProfile | None = None,
 ) -> AnalysisResult:
     """对单只股票执行智能分析。"""
+    active_profile = profile or _load_profile()
+    strategy_config = active_profile.strategy
     normalized_code = normalize_code(code)
     lookback_days = days or strategy_config.lookback_days
 
@@ -43,7 +49,13 @@ def analyze_stock(
     use_demo_names = demo or data_source != "live"
     enriched = enrich_indicators(bars, indicator_config)
     indicators = latest_indicator_snapshot(enriched)
-    signal, score, reasons = generate_signal(enriched, indicators, strategy_config)
+    signal, score, reasons = generate_signal(
+        enriched,
+        indicators,
+        strategy_config,
+        weights=active_profile.weights,
+        use_ama_trend=active_profile.use_ama_trend,
+    )
 
     latest = enriched.iloc[-1]
     result = AnalysisResult(
@@ -69,7 +81,7 @@ def analyze_stock(
         enriched,
         data_source=data_source,
         demo=use_demo_names,
-        strategy_config=strategy_config,
+        profile=active_profile,
     )
 
 
@@ -84,7 +96,13 @@ def analyze_many(
     for code in codes:
         try:
             results.append(
-                analyze_stock(code, days=days, demo=demo, allow_fallback=allow_fallback)
+                analyze_stock(
+                    code,
+                    days=days,
+                    demo=demo,
+                    allow_fallback=allow_fallback,
+                    profile=_load_profile(),
+                )
             )
         except Exception as exc:  # noqa: BLE001 - 批量分析需要跳过失败项
             results.append(

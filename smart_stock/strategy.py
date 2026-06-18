@@ -7,9 +7,10 @@ import pandas as pd
 from smart_stock.config import DEFAULT_STRATEGY_CONFIG, StrategyConfig
 from smart_stock.indicators import latest_indicator_snapshot
 from smart_stock.models import IndicatorSnapshot, Signal
+from smart_stock.strategy_profile import FactorWeights, StrategyProfile
 
 
-def score_trend(price: float, indicators: IndicatorSnapshot) -> tuple[float, list[str]]:
+def score_trend(price: float, indicators: IndicatorSnapshot, *, use_ama: bool = True) -> tuple[float, list[str]]:
     """均线趋势评分。"""
     score = 0.0
     reasons: list[str] = []
@@ -40,6 +41,14 @@ def score_trend(price: float, indicators: IndicatorSnapshot) -> tuple[float, lis
         reasons.append("价格站上 20 日均线")
     elif price < (indicators.ma20 or price):
         reasons.append("价格跌破 20 日均线")
+
+    if use_ama and indicators.ama is not None:
+        if price > indicators.ama:
+            score += 0.2
+            reasons.append("价格站上 AMA 自适应均线")
+        else:
+            score -= 0.2
+            reasons.append("价格跌破 AMA 自适应均线")
 
     return score, reasons
 
@@ -203,20 +212,25 @@ def generate_signal(
     df: pd.DataFrame,
     indicators: IndicatorSnapshot,
     config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    weights: FactorWeights | None = None,
+    use_ama_trend: bool = True,
 ) -> tuple[Signal, float, list[str]]:
     """综合评分并输出交易信号。"""
     price = float(df.iloc[-1]["close"])
+    factor_weights = (weights or FactorWeights()).clamp()
     total_score = 0.0
     reasons: list[str] = []
 
-    for partial_score, partial_reasons in (
-        score_trend(price, indicators),
-        score_momentum(indicators),
-        score_volatility(price, indicators),
-        score_volume(df, indicators),
-        score_obv(df, price, indicators),
-    ):
-        total_score += partial_score
+    components = [
+        (score_trend(price, indicators, use_ama=use_ama_trend), factor_weights.trend),
+        (score_momentum(indicators), factor_weights.momentum),
+        (score_volatility(price, indicators), factor_weights.volatility),
+        (score_volume(df, indicators), factor_weights.volume),
+        (score_obv(df, price, indicators), factor_weights.obv),
+    ]
+
+    for (partial_score, partial_reasons), weight in components:
+        total_score += partial_score * weight
         reasons.extend(partial_reasons)
 
     if total_score >= config.buy_threshold + 0.4:
@@ -244,6 +258,7 @@ def generate_signal(
 def compute_trade_markers(
     enriched: pd.DataFrame,
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    profile: StrategyProfile | None = None,
     warmup_days: int = 60,
 ) -> dict[str, list[dict[str, float | str]]]:
     """根据策略信号生成 K 线买卖点标记（信号由观望转为买入/卖出时触发）。"""
@@ -253,6 +268,7 @@ def compute_trade_markers(
     if len(enriched) <= warmup_days:
         return {"buy_markers": buy_markers, "sell_markers": sell_markers}
 
+    active_profile = profile or StrategyProfile(strategy=strategy_config)
     prev_signal: Signal | None = None
     buy_set = {Signal.BUY, Signal.STRONG_BUY}
     sell_set = {Signal.SELL, Signal.STRONG_SELL}
@@ -261,7 +277,13 @@ def compute_trade_markers(
         window = enriched.iloc[: index + 1]
         row = enriched.iloc[index]
         indicators = latest_indicator_snapshot(window)
-        signal, score, _ = generate_signal(window, indicators, strategy_config)
+        signal, score, _ = generate_signal(
+            window,
+            indicators,
+            active_profile.strategy,
+            weights=active_profile.weights,
+            use_ama_trend=active_profile.use_ama_trend,
+        )
 
         if signal in buy_set and (prev_signal is None or prev_signal not in buy_set):
             buy_markers.append(

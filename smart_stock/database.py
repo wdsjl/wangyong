@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS analysis_history (
 
 CREATE INDEX IF NOT EXISTS idx_analysis_history_code ON analysis_history(code);
 CREATE INDEX IF NOT EXISTS idx_signal_alerts_created ON signal_alerts(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS strategy_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -174,6 +180,39 @@ class SignalAlert:
     to_signal: str
     score: float
     created_at: str
+
+
+def get_strategy_settings(db_path: Path | None = None) -> dict[str, Any]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT payload_json, updated_at FROM strategy_settings WHERE id = 1"
+        ).fetchone()
+    if row is None:
+        from smart_stock.strategy_profile import DEFAULT_STRATEGY_PROFILE
+
+        return {**DEFAULT_STRATEGY_PROFILE.to_dict(), "updated_at": None}
+    payload = json.loads(str(row["payload_json"]))
+    payload["updated_at"] = row["updated_at"]
+    return payload
+
+
+def save_strategy_settings(payload: dict[str, Any], db_path: Path | None = None) -> dict[str, Any]:
+    init_db(db_path)
+    now = _utc_now()
+    clean = {key: value for key, value in payload.items() if key != "updated_at"}
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO strategy_settings(id, payload_json, updated_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            (json.dumps(clean, ensure_ascii=False), now),
+        )
+    return {**clean, "updated_at": now}
 
 
 def list_watchlist_codes(db_path: Path | None = None) -> list[str]:

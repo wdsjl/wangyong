@@ -10,6 +10,7 @@ from smart_stock.config import (
     ResonanceConfig,
     StrategyConfig,
 )
+from smart_stock.strategy_profile import StrategyProfile
 from smart_stock.models import (
     ChipSnapshot,
     FundamentalSnapshot,
@@ -17,6 +18,8 @@ from smart_stock.models import (
     MoneyFlowSnapshot,
     MonitoringSnapshot,
     NorthboundSnapshot,
+    SectorSnapshot,
+    VixSnapshot,
 )
 
 
@@ -43,6 +46,12 @@ def compute_trend_score(price: float, indicators: IndicatorSnapshot) -> tuple[in
             score = min(100, score + 12)
         elif indicators.ma5 < indicators.ma10 < indicators.ma20:
             score = max(0, score - 12)
+
+    if indicators.ama is not None:
+        if price > indicators.ama:
+            score = min(100, score + 8)
+        else:
+            score = max(0, score - 8)
 
     if score >= 75:
         label = "强势多头"
@@ -292,6 +301,9 @@ def build_alerts(
     fundamentals: FundamentalSnapshot | None = None,
     northbound: NorthboundSnapshot | None = None,
     momentum_resonance: str = "无",
+    vix: VixSnapshot | None = None,
+    sector: SectorSnapshot | None = None,
+    vix_caution_threshold: int = 65,
 ) -> list[dict[str, str]]:
     alerts: list[dict[str, str]] = []
 
@@ -401,7 +413,43 @@ def build_alerts(
                 }
             )
 
+    if vix and vix.index_value is not None and vix.index_value >= vix_caution_threshold:
+        alerts.append(
+            {
+                "level": "warning",
+                "type": "vix",
+                "message": f"波动恐慌指数 {vix.index_value}（{vix.label}），注意仓位控制",
+            }
+        )
+
+    if sector and sector.sentiment_score <= 35:
+        alerts.append(
+            {
+                "level": "warning",
+                "type": "sector",
+                "message": f"{sector.sector_name}板块偏弱（{sector.sentiment_label}，涨跌 {sector.change_pct}%）",
+            }
+        )
+    elif sector and sector.sentiment_score >= 65:
+        alerts.append(
+            {
+                "level": "info",
+                "type": "sector",
+                "message": f"{sector.sector_name}板块偏强（涨跌 {sector.change_pct}%）",
+            }
+        )
+
     return alerts
+
+
+def _ama_signal(price: float, indicators: IndicatorSnapshot) -> str:
+    if indicators.ama is None:
+        return "未知"
+    if price > indicators.ama * 1.005:
+        return "AMA上方"
+    if price < indicators.ama * 0.995:
+        return "AMA下方"
+    return "AMA附近"
 
 
 def compute_monitoring_snapshot(
@@ -410,10 +458,16 @@ def compute_monitoring_snapshot(
     money_flow: MoneyFlowSnapshot | None = None,
     strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
     resonance_config: ResonanceConfig = DEFAULT_RESONANCE_CONFIG,
+    profile: StrategyProfile | None = None,
     chip: ChipSnapshot | None = None,
     fundamentals: FundamentalSnapshot | None = None,
     northbound: NorthboundSnapshot | None = None,
+    vix: VixSnapshot | None = None,
+    sector: SectorSnapshot | None = None,
 ) -> MonitoringSnapshot:
+    active_profile = profile or StrategyProfile(strategy=strategy_config, resonance=resonance_config)
+    strategy_config = active_profile.strategy
+    resonance_config = active_profile.resonance
     price = float(df.iloc[-1]["close"])
     trend_score, trend_label = compute_trend_score(price, indicators)
     resonance_level, resonance_side, resonance_hits, resonance_score = compute_resonance(
@@ -436,6 +490,9 @@ def compute_monitoring_snapshot(
         fundamentals=fundamentals,
         northbound=northbound,
         momentum_resonance=momentum,
+        vix=vix,
+        sector=sector,
+        vix_caution_threshold=active_profile.vix_caution_threshold,
     )
 
     return MonitoringSnapshot(
@@ -456,6 +513,9 @@ def compute_monitoring_snapshot(
         chip=chip,
         fundamentals=fundamentals,
         northbound=northbound,
+        vix=vix,
+        sector=sector,
+        ama_signal=_ama_signal(price, indicators),
         alerts=alerts,
         money_flow=money_flow,
     )

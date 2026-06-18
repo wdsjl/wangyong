@@ -22,6 +22,9 @@ class IndicatorConfig:
     wr_period: int = 14
     mfi_period: int = 14
     adx_period: int = 14
+    ama_period: int = 10
+    ama_fast: int = 2
+    ama_slow: int = 30
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ import pandas as pd
 
 from smart_stock import eastmoney
 from smart_stock.network import format_fetch_error, without_system_proxy
-from smart_stock.sample_data import generate_demo_bars, get_demo_name, search_demo_stocks
+from smart_stock.sample_data import generate_demo_bars, generate_demo_intraday, get_demo_name, search_demo_stocks
 from smart_stock.models import AnalysisResult
 
 try:
@@ -157,6 +157,29 @@ def fetch_daily_bars(code: str, days: int = 180, demo: bool = False) -> pd.DataF
             errors.append(exc)
 
     raise DataFetchError(format_fetch_error(errors[-1])) from errors[-1]
+
+
+def fetch_intraday_bars_safe(
+    code: str,
+    period: str = "5m",
+    bars: int = 48,
+    demo: bool = False,
+    allow_fallback: bool = False,
+) -> tuple[pd.DataFrame, str]:
+    """获取分时 K 线，必要时回退演示数据。"""
+    normalized = normalize_code(code)
+    if demo:
+        return generate_demo_intraday(normalized, period=period, bars=bars), "demo"
+    try:
+        raw = eastmoney.fetch_intraday_bars(normalized, period=period, bars=bars)
+        if raw.empty:
+            raise DataFetchError(f"未获取到股票 {code} 的分时数据")
+        df = _normalize_bars(raw)
+        return df, "live"
+    except Exception:
+        if allow_fallback:
+            return generate_demo_intraday(normalized, period=period, bars=bars), "demo_fallback"
+        raise
 
 
 def fetch_daily_bars_safe(
