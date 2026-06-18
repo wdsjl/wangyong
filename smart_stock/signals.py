@@ -1,0 +1,521 @@
+"""盯盘衍生信号：趋势打分、共振、预警。"""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from smart_stock.config import (
+    DEFAULT_RESONANCE_CONFIG,
+    DEFAULT_STRATEGY_CONFIG,
+    ResonanceConfig,
+    StrategyConfig,
+)
+from smart_stock.strategy_profile import StrategyProfile
+from smart_stock.models import (
+    ChipSnapshot,
+    FundamentalSnapshot,
+    IndicatorSnapshot,
+    MoneyFlowSnapshot,
+    MonitoringSnapshot,
+    NorthboundSnapshot,
+    SectorSnapshot,
+    VixSnapshot,
+)
+
+
+def compute_trend_score(price: float, indicators: IndicatorSnapshot) -> tuple[int, str]:
+    """均线共振趋势分 0-100。"""
+    score = 50
+    ma_pairs = [
+        (indicators.ma5, 8),
+        (indicators.ma10, 8),
+        (indicators.ma20, 12),
+        (indicators.ma60, 12),
+        (indicators.ma120, 10),
+    ]
+    available = [(ma, weight) for ma, weight in ma_pairs if ma is not None]
+    if not available:
+        return 50, "震荡"
+
+    above = sum(weight for ma, weight in available if price > ma)
+    total = sum(weight for _, weight in available)
+    score = int(round(20 + (above / total) * 60))
+
+    if indicators.ma5 and indicators.ma10 and indicators.ma20:
+        if indicators.ma5 > indicators.ma10 > indicators.ma20:
+            score = min(100, score + 12)
+        elif indicators.ma5 < indicators.ma10 < indicators.ma20:
+            score = max(0, score - 12)
+
+    if indicators.ama is not None:
+        if price > indicators.ama:
+            score = min(100, score + 8)
+        else:
+            score = max(0, score - 8)
+
+    if score >= 75:
+        label = "强势多头"
+    elif score >= 60:
+        label = "偏多"
+    elif score <= 25:
+        label = "强势空头"
+    elif score <= 40:
+        label = "偏空"
+    else:
+        label = "震荡"
+    return score, label
+
+
+def _obv_trend(df: pd.DataFrame, window: int = 5) -> str:
+    if len(df) < window + 1 or "obv" not in df.columns:
+        return "flat"
+    recent = df["obv"].tail(window)
+    delta = float(recent.iloc[-1] - recent.iloc[0])
+    if delta > 0:
+        return "up"
+    if delta < 0:
+        return "down"
+    return "flat"
+
+
+def _volume_signal(df: pd.DataFrame, indicators: IndicatorSnapshot) -> str:
+    if len(df) < 2:
+        return "量能平稳"
+    latest = df.iloc[-1]
+    ratio = indicators.volume_ratio
+    if ratio is None or pd.isna(ratio):
+        return "量能平稳"
+    if ratio > 1.5 and latest["close"] > latest["open"]:
+        return "放量上涨"
+    if ratio > 1.5 and latest["close"] < latest["open"]:
+        return "放量下跌"
+    if ratio > 1.2:
+        return "温和放量"
+    if ratio < 0.7:
+        return "缩量整理"
+    return "量能平稳"
+
+
+def _boll_position(price: float, indicators: IndicatorSnapshot) -> str:
+    upper, lower, middle = indicators.boll_upper, indicators.boll_lower, indicators.boll_middle
+    if None in (upper, lower, middle):
+        return "中轨附近"
+    width = upper - lower
+    if width <= 0:
+        return "中轨附近"
+    pos = (price - lower) / width
+    if pos >= 0.9:
+        return "逼近上轨"
+    if pos <= 0.1:
+        return "逼近下轨"
+    if price > middle:
+        return "中轨上方"
+    if price < middle:
+        return "中轨下方"
+    return "中轨附近"
+
+
+def _detect_macd_bullish_divergence(df: pd.DataFrame, lookback: int = 20) -> bool:
+    if len(df) < lookback or "macd_hist" not in df.columns:
+        return False
+    window = df.tail(lookback)
+    price = window["close"]
+    hist = window["macd_hist"]
+    if price.isna().any() or hist.isna().any():
+        return False
+    price_low_idx = price.idxmin()
+    half = window.iloc[len(window) // 2 :]
+    if half.empty:
+        return False
+    later_price_low = half["close"].min()
+    later_hist_at_lows = half.loc[half["close"] == later_price_low, "macd_hist"]
+    if later_hist_at_lows.empty:
+        return False
+    first_hist = float(hist.loc[price_low_idx])
+    later_hist = float(later_hist_at_lows.iloc[-1])
+    return later_price_low < float(price.loc[price_low_idx]) and later_hist > first_hist
+
+
+def _detect_macd_bearish_divergence(df: pd.DataFrame, lookback: int = 20) -> bool:
+    if len(df) < lookback or "macd_hist" not in df.columns:
+        return False
+    window = df.tail(lookback)
+    price = window["close"]
+    hist = window["macd_hist"]
+    if price.isna().any() or hist.isna().any():
+        return False
+    price_high_idx = price.idxmax()
+    half = window.iloc[len(window) // 2 :]
+    if half.empty:
+        return False
+    later_price_high = half["close"].max()
+    later_hist_at_highs = half.loc[half["close"] == later_price_high, "macd_hist"]
+    if later_hist_at_highs.empty:
+        return False
+    first_hist = float(hist.loc[price_high_idx])
+    later_hist = float(later_hist_at_highs.iloc[-1])
+    return later_price_high > float(price.loc[price_high_idx]) and later_hist < first_hist
+
+
+def compute_resonance(
+    df: pd.DataFrame,
+    indicators: IndicatorSnapshot,
+    price: float,
+    config: ResonanceConfig = DEFAULT_RESONANCE_CONFIG,
+) -> tuple[str, str, list[str], int]:
+    """多指标共振：返回 level, side, hits, score。"""
+    bullish_hits: list[str] = []
+    bearish_hits: list[str] = []
+
+    if indicators.ma5 and indicators.ma10 and indicators.ma20 and indicators.ma5 > indicators.ma10 > indicators.ma20:
+        bullish_hits.append("均线多头排列")
+    if indicators.ma5 and indicators.ma10 and indicators.ma20 and indicators.ma5 < indicators.ma10 < indicators.ma20:
+        bearish_hits.append("均线空头排列")
+
+    if indicators.macd_hist is not None and indicators.macd_hist > 0:
+        bullish_hits.append("MACD红柱")
+    if indicators.macd_hist is not None and indicators.macd_hist < 0:
+        bearish_hits.append("MACD绿柱")
+
+    if indicators.rsi is not None and indicators.rsi < config.rsi_oversold:
+        bullish_hits.append(f"RSI超卖({indicators.rsi:.1f})")
+    if indicators.rsi is not None and indicators.rsi > config.rsi_overbought:
+        bearish_hits.append(f"RSI超买({indicators.rsi:.1f})")
+
+    ratio = indicators.volume_ratio or 0
+    if ratio >= config.volume_breakout_ratio and len(df) >= 1 and df.iloc[-1]["close"] > df.iloc[-1]["open"]:
+        bullish_hits.append("放量阳线")
+    if ratio >= config.volume_breakout_ratio and len(df) >= 1 and df.iloc[-1]["close"] < df.iloc[-1]["open"]:
+        bearish_hits.append("放量阴线")
+
+    if _detect_macd_bullish_divergence(df):
+        bullish_hits.append("MACD底背离")
+    if _detect_macd_bearish_divergence(df):
+        bearish_hits.append("MACD顶背离")
+
+    obv = _obv_trend(df)
+    if obv == "up" and price >= (indicators.ma20 or price):
+        bullish_hits.append("OBV资金流入")
+    if obv == "down" and price <= (indicators.ma20 or price):
+        bearish_hits.append("OBV资金流出")
+
+    if indicators.kdj_k is not None and indicators.kdj_k < config.kdj_oversold:
+        bullish_hits.append(f"KDJ超卖(K={indicators.kdj_k:.0f})")
+    if indicators.kdj_k is not None and indicators.kdj_k > config.kdj_overbought:
+        bearish_hits.append(f"KDJ超买(K={indicators.kdj_k:.0f})")
+
+    if indicators.cci is not None and indicators.cci < config.cci_oversold:
+        bullish_hits.append(f"CCI超卖({indicators.cci:.0f})")
+    if indicators.cci is not None and indicators.cci > config.cci_overbought:
+        bearish_hits.append(f"CCI超买({indicators.cci:.0f})")
+
+    if indicators.wr is not None and indicators.wr < config.wr_oversold:
+        bullish_hits.append(f"WR超卖({indicators.wr:.0f})")
+    if indicators.wr is not None and indicators.wr > config.wr_overbought:
+        bearish_hits.append(f"WR超买({indicators.wr:.0f})")
+
+    if indicators.mfi is not None and indicators.mfi < config.mfi_oversold:
+        bullish_hits.append(f"MFI资金低位({indicators.mfi:.0f})")
+    if indicators.mfi is not None and indicators.mfi > config.mfi_overbought:
+        bearish_hits.append(f"MFI资金过热({indicators.mfi:.0f})")
+
+    if indicators.adx is not None and indicators.adx >= 25:
+        if indicators.plus_di is not None and indicators.minus_di is not None:
+            if indicators.plus_di > indicators.minus_di:
+                bullish_hits.append(f"ADX趋势向上({indicators.adx:.0f})")
+            else:
+                bearish_hits.append(f"ADX趋势向下({indicators.adx:.0f})")
+
+    bull_count = len(bullish_hits)
+    bear_count = len(bearish_hits)
+
+    if bull_count >= config.strong_min_hits and bull_count > bear_count:
+        return "strong", "bullish", bullish_hits, min(100, 50 + bull_count * 10)
+    if bear_count >= config.strong_min_hits and bear_count > bull_count:
+        return "strong", "bearish", bearish_hits, max(0, 50 - bear_count * 10)
+    if bull_count >= config.weak_min_hits and bull_count > bear_count:
+        return "weak", "bullish", bullish_hits, min(100, 40 + bull_count * 8)
+    if bear_count >= config.weak_min_hits and bear_count > bull_count:
+        return "weak", "bearish", bearish_hits, max(0, 60 - bear_count * 8)
+    return "none", "neutral", [], 50
+
+
+def compute_atr_stop_loss(
+    price: float,
+    indicators: IndicatorSnapshot,
+    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+) -> float | None:
+    if indicators.atr is None or indicators.atr <= 0:
+        return None
+    return round(price - strategy_config.atr_stop_multiplier * indicators.atr, 2)
+
+
+def _trend_regime(adx: float | None, config: StrategyConfig = DEFAULT_STRATEGY_CONFIG) -> str:
+    if adx is None:
+        return "未知"
+    if adx >= config.adx_trend_threshold:
+        return "趋势市"
+    if adx < config.adx_range_threshold:
+        return "震荡市"
+    return "过渡区"
+
+
+def _momentum_resonance(indicators: IndicatorSnapshot, config: ResonanceConfig = DEFAULT_RESONANCE_CONFIG) -> str:
+    oversold = 0
+    overbought = 0
+    if indicators.rsi is not None and indicators.rsi < config.rsi_oversold:
+        oversold += 1
+    if indicators.kdj_k is not None and indicators.kdj_k < config.kdj_oversold:
+        oversold += 1
+    if indicators.cci is not None and indicators.cci < config.cci_oversold:
+        oversold += 1
+    if indicators.wr is not None and indicators.wr < config.wr_oversold:
+        oversold += 1
+
+    if indicators.rsi is not None and indicators.rsi > config.rsi_overbought:
+        overbought += 1
+    if indicators.kdj_k is not None and indicators.kdj_k > config.kdj_overbought:
+        overbought += 1
+    if indicators.cci is not None and indicators.cci > config.cci_overbought:
+        overbought += 1
+    if indicators.wr is not None and indicators.wr > config.wr_overbought:
+        overbought += 1
+
+    if oversold >= 2:
+        return "超卖共振"
+    if overbought >= 2:
+        return "超买共振"
+    return "无"
+
+
+def build_alerts(
+    df: pd.DataFrame,
+    indicators: IndicatorSnapshot,
+    price: float,
+    resonance_level: str,
+    resonance_side: str,
+    resonance_hits: list[str],
+    money_flow: MoneyFlowSnapshot | None,
+    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    chip: ChipSnapshot | None = None,
+    fundamentals: FundamentalSnapshot | None = None,
+    northbound: NorthboundSnapshot | None = None,
+    momentum_resonance: str = "无",
+    vix: VixSnapshot | None = None,
+    sector: SectorSnapshot | None = None,
+    vix_caution_threshold: int = 65,
+) -> list[dict[str, str]]:
+    alerts: list[dict[str, str]] = []
+
+    boll_pos = _boll_position(price, indicators)
+    if boll_pos == "逼近上轨":
+        alerts.append({"level": "warning", "type": "boll", "message": "价格逼近布林上轨，注意回调"})
+    if boll_pos == "逼近下轨":
+        alerts.append({"level": "info", "type": "boll", "message": "价格逼近布林下轨，关注反弹"})
+
+    stop_loss = compute_atr_stop_loss(price, indicators, strategy_config)
+    if stop_loss is not None and price <= stop_loss * 1.01:
+        alerts.append(
+            {
+                "level": "danger",
+                "type": "atr",
+                "message": f"价格接近 ATR 动态止损位 {stop_loss:.2f}",
+            }
+        )
+
+    if resonance_level == "strong" and resonance_side == "bullish":
+        alerts.append(
+            {
+                "level": "strong",
+                "type": "resonance",
+                "message": "多指标强势共振看多：" + "、".join(resonance_hits[:4]),
+            }
+        )
+    elif resonance_level == "strong" and resonance_side == "bearish":
+        alerts.append(
+            {
+                "level": "strong",
+                "type": "resonance",
+                "message": "多指标强势共振看空：" + "、".join(resonance_hits[:4]),
+            }
+        )
+    elif resonance_level == "weak" and resonance_hits:
+        alerts.append(
+            {
+                "level": "weak",
+                "type": "resonance",
+                "message": "弱共振信号：" + "、".join(resonance_hits[:3]),
+            }
+        )
+
+    if momentum_resonance == "超卖共振":
+        alerts.append({"level": "strong", "type": "momentum", "message": "RSI+KDJ/CCI/WR 超卖共振，关注低吸"})
+    if momentum_resonance == "超买共振":
+        alerts.append({"level": "warning", "type": "momentum", "message": "RSI+KDJ/CCI/WR 超买共振，注意止盈"})
+
+    if indicators.adx is not None and indicators.adx < strategy_config.adx_range_threshold:
+        alerts.append(
+            {
+                "level": "info",
+                "type": "adx",
+                "message": f"ADX={indicators.adx:.1f}，震荡行情宜观望",
+            }
+        )
+
+    if chip and chip.profit_ratio is not None:
+        if chip.profit_ratio >= 90:
+            alerts.append({"level": "warning", "type": "chip", "message": f"获利盘 {chip.profit_ratio:.1f}%，抛压风险"})
+        elif chip.profit_ratio <= 15:
+            alerts.append({"level": "info", "type": "chip", "message": f"获利盘仅 {chip.profit_ratio:.1f}%，筹码相对稳定"})
+
+    if fundamentals and fundamentals.valuation_label in {"偏高估", "亏损"}:
+        alerts.append(
+            {
+                "level": "info",
+                "type": "valuation",
+                "message": f"估值标签：{fundamentals.valuation_label}（PE={fundamentals.pe_ttm or '-'}）",
+            }
+        )
+
+    if northbound and northbound.eligible and northbound.net_inflow_today is not None:
+        if northbound.net_inflow_today > 0:
+            alerts.append(
+                {
+                    "level": "info",
+                    "type": "northbound",
+                    "message": f"北向净流入 {northbound.net_inflow_today / 10000:.1f} 万",
+                }
+            )
+        elif northbound.net_inflow_today < 0:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "type": "northbound",
+                    "message": f"北向净流出 {abs(northbound.net_inflow_today) / 10000:.1f} 万",
+                }
+            )
+
+    if money_flow and money_flow.main_net_inflow is not None:
+        if money_flow.main_net_inflow > 0 and money_flow.main_net_pct and money_flow.main_net_pct >= 5:
+            alerts.append(
+                {
+                    "level": "info",
+                    "type": "money_flow",
+                    "message": f"主力净流入 {money_flow.main_net_inflow / 10000:.1f} 万，占比 {money_flow.main_net_pct:.1f}%",
+                }
+            )
+        elif money_flow.main_net_inflow < 0 and money_flow.main_net_pct and money_flow.main_net_pct <= -5:
+            alerts.append(
+                {
+                    "level": "warning",
+                    "type": "money_flow",
+                    "message": f"主力净流出 {abs(money_flow.main_net_inflow) / 10000:.1f} 万，占比 {abs(money_flow.main_net_pct):.1f}%",
+                }
+            )
+
+    if vix and vix.index_value is not None and vix.index_value >= vix_caution_threshold:
+        alerts.append(
+            {
+                "level": "warning",
+                "type": "vix",
+                "message": f"波动恐慌指数 {vix.index_value}（{vix.label}），注意仓位控制",
+            }
+        )
+
+    if sector and sector.sentiment_score <= 35:
+        alerts.append(
+            {
+                "level": "warning",
+                "type": "sector",
+                "message": f"{sector.sector_name}板块偏弱（{sector.sentiment_label}，涨跌 {sector.change_pct}%）",
+            }
+        )
+    elif sector and sector.sentiment_score >= 65:
+        alerts.append(
+            {
+                "level": "info",
+                "type": "sector",
+                "message": f"{sector.sector_name}板块偏强（涨跌 {sector.change_pct}%）",
+            }
+        )
+
+    return alerts
+
+
+def _ama_signal(price: float, indicators: IndicatorSnapshot) -> str:
+    if indicators.ama is None:
+        return "未知"
+    if price > indicators.ama * 1.005:
+        return "AMA上方"
+    if price < indicators.ama * 0.995:
+        return "AMA下方"
+    return "AMA附近"
+
+
+def compute_monitoring_snapshot(
+    df: pd.DataFrame,
+    indicators: IndicatorSnapshot,
+    money_flow: MoneyFlowSnapshot | None = None,
+    strategy_config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+    resonance_config: ResonanceConfig = DEFAULT_RESONANCE_CONFIG,
+    profile: StrategyProfile | None = None,
+    chip: ChipSnapshot | None = None,
+    fundamentals: FundamentalSnapshot | None = None,
+    northbound: NorthboundSnapshot | None = None,
+    vix: VixSnapshot | None = None,
+    sector: SectorSnapshot | None = None,
+) -> MonitoringSnapshot:
+    active_profile = profile or StrategyProfile(strategy=strategy_config, resonance=resonance_config)
+    strategy_config = active_profile.strategy
+    resonance_config = active_profile.resonance
+    price = float(df.iloc[-1]["close"])
+    trend_score, trend_label = compute_trend_score(price, indicators)
+    resonance_level, resonance_side, resonance_hits, resonance_score = compute_resonance(
+        df, indicators, price, resonance_config
+    )
+    stop_loss = compute_atr_stop_loss(price, indicators, strategy_config)
+    momentum = _momentum_resonance(indicators, resonance_config)
+    regime = _trend_regime(indicators.adx, strategy_config)
+
+    alerts = build_alerts(
+        df,
+        indicators,
+        price,
+        resonance_level,
+        resonance_side,
+        resonance_hits,
+        money_flow,
+        strategy_config,
+        chip=chip,
+        fundamentals=fundamentals,
+        northbound=northbound,
+        momentum_resonance=momentum,
+        vix=vix,
+        sector=sector,
+        vix_caution_threshold=active_profile.vix_caution_threshold,
+    )
+
+    return MonitoringSnapshot(
+        trend_score=trend_score,
+        trend_label=trend_label,
+        resonance_level=resonance_level,
+        resonance_side=resonance_side,
+        resonance_hits=resonance_hits,
+        resonance_score=resonance_score,
+        atr_stop_loss=stop_loss,
+        atr_stop_multiplier=strategy_config.atr_stop_multiplier,
+        obv_trend=_obv_trend(df),
+        volume_signal=_volume_signal(df, indicators),
+        boll_position=_boll_position(price, indicators),
+        adx=indicators.adx,
+        trend_regime=regime,
+        momentum_resonance=momentum,
+        chip=chip,
+        fundamentals=fundamentals,
+        northbound=northbound,
+        vix=vix,
+        sector=sector,
+        ama_signal=_ama_signal(price, indicators),
+        alerts=alerts,
+        money_flow=money_flow,
+    )

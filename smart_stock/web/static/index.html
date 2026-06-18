@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>智能炒股 · 全功能盯盘面板</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/vendor/chart.umd.min.js"></script>
+    <script src="/static/vendor/hammer.min.js"></script>
+    <script src="/static/vendor/chartjs-plugin-zoom.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header class="hero">
+        <div>
+          <h1>智能炒股 · 全功能盯盘面板</h1>
+          <p>实时看板 · K 线 · 分时 · AMA/VIX/板块情绪 · 自定义策略 · SQLite 持久化</p>
+        </div>
+        <div class="hero-badges">
+          <div class="badge" id="modeBadge">模式加载中...</div>
+          <div class="badge monitor-badge" id="monitorBadge">监控初始化...</div>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="toolbar">
+          <input id="searchInput" type="text" placeholder="输入股票代码或名称，例如 600519 / 茅台" />
+          <select id="daysSelect">
+            <option value="60">60 日</option>
+            <option value="120" selected>120 日</option>
+            <option value="180">180 日</option>
+          </select>
+          <button id="searchBtn">搜索</button>
+          <button id="analyzeBtn">分析</button>
+        </div>
+
+        <div class="status" id="statusText"></div>
+
+        <div class="panel live-dashboard">
+          <div class="dashboard-toolbar">
+            <div>
+              <h3>实时盯盘看板</h3>
+              <p class="chart-hint" id="monitorStatusText">加载自选股后自动刷新，可边看 K 线边监控</p>
+            </div>
+            <div class="dashboard-actions">
+              <label class="toggle">
+                <input id="syncChartToggle" type="checkbox" />
+                <span>监控时同步刷新当前股 K 线</span>
+              </label>
+              <button class="secondary small" id="monitorNowBtn" type="button">立即刷新看板</button>
+            </div>
+          </div>
+          <div class="dashboard-grid">
+            <div class="live-board-wrap">
+              <table class="live-board-table">
+                <thead>
+                  <tr>
+                    <th>代码</th>
+                    <th>名称</th>
+                    <th>现价</th>
+                    <th>信号</th>
+                    <th>趋势</th>
+                    <th>共振</th>
+                    <th>ADX</th>
+                    <th>动量</th>
+                    <th>VIX</th>
+                    <th>板块</th>
+                    <th>AMA</th>
+                  </tr>
+                </thead>
+                <tbody id="liveBoardBody">
+                  <tr>
+                    <td colspan="11" class="empty-cell">添加自选股后开始实时盯盘</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="alert-feed" id="alertPanel">
+              <div class="empty">暂无盯盘提醒</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="layout">
+          <aside class="sidebar">
+            <div class="panel">
+              <h3>搜索结果</h3>
+              <div class="search-results" id="searchResults">
+                <div class="empty">输入关键词开始搜索</div>
+              </div>
+            </div>
+
+            <div class="panel signal-card" id="signalCard">
+              <h2 id="stockTitle">请选择股票</h2>
+              <div class="signal-header">
+                <div>
+                  <div class="price" id="latestPrice">--</div>
+                  <div class="meta" id="latestDate">--</div>
+                </div>
+                <div class="signal-pill hold" id="signalPill">观望</div>
+              </div>
+              <div>
+                <div class="meta">综合评分 <strong id="scoreText">0.000</strong></div>
+                <div class="score-bar">
+                  <div class="score-fill" id="scoreFill"></div>
+                </div>
+              </div>
+              <div class="monitoring-panel" id="monitoringPanel">
+                <div class="monitoring-grid">
+                  <div class="monitor-card">
+                    <span>趋势分</span>
+                    <strong id="trendScoreText">--</strong>
+                    <small id="trendLabelText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>共振</span>
+                    <strong id="resonanceText">--</strong>
+                    <small id="resonanceHitsText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>ATR止损</span>
+                    <strong id="atrStopText">--</strong>
+                    <small id="volumeSignalText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>主力资金</span>
+                    <strong id="mainFlowText">--</strong>
+                    <small id="obvTrendText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>ADX / 市况</span>
+                    <strong id="adxText">--</strong>
+                    <small id="trendRegimeText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>动量共振</span>
+                    <strong id="momentumResonanceText">--</strong>
+                    <small id="chipText">--</small>
+                  </div>
+                  <div class="monitor-card">
+                    <span>估值 / 北向</span>
+                    <strong id="valuationText">--</strong>
+                    <small id="northboundText">--</small>
+                  </div>
+                  <div class="monitor-card phase3-card">
+                    <span>AMA 趋势</span>
+                    <strong id="amaSignalText">--</strong>
+                    <small id="amaValueText">--</small>
+                  </div>
+                  <div class="monitor-card phase3-card">
+                    <span>VIX 恐慌</span>
+                    <strong id="vixText">--</strong>
+                    <small id="vixTrendText">--</small>
+                  </div>
+                  <div class="monitor-card phase3-card">
+                    <span>板块情绪</span>
+                    <strong id="sectorText">--</strong>
+                    <small id="sectorChangeText">--</small>
+                  </div>
+                  <div class="monitor-card phase3-card">
+                    <span>分时动量</span>
+                    <strong id="intradayMomentumText">--</strong>
+                    <small id="intradayVwapText">--</small>
+                  </div>
+                </div>
+                <ul class="alert-inline-list" id="inlineAlerts"></ul>
+              </div>
+              <div class="analysis-actions">
+                <button class="secondary small" id="backtestBtn" type="button">策略回测</button>
+                <button class="secondary small" id="insightBtn" type="button">AI 解读</button>
+              </div>
+              <ul class="reason-list" id="reasonList"></ul>
+              <div class="metric-grid" id="metricGrid"></div>
+              <div class="risk-note" id="riskNote"></div>
+            </div>
+
+            <div class="panel" id="strategyPanel">
+              <div class="watchlist-header">
+                <h3>自定义策略编辑器</h3>
+                <button class="secondary small" id="saveStrategyBtn" type="button">保存策略</button>
+              </div>
+              <p class="watch-note">调整买卖阈值与因子权重，保存后下次「分析」与回测生效</p>
+              <div class="strategy-form">
+                <div class="strategy-row">
+                  <label>买入阈值 <input id="buyThreshold" type="number" step="0.1" min="0.1" max="2" /></label>
+                  <label>卖出阈值 <input id="sellThreshold" type="number" step="0.1" min="-2" max="-0.1" /></label>
+                </div>
+                <div class="strategy-row">
+                  <label>ADX 趋势 <input id="adxTrendThreshold" type="number" step="1" min="15" max="50" /></label>
+                  <label>ADX 震荡 <input id="adxRangeThreshold" type="number" step="1" min="10" max="30" /></label>
+                </div>
+                <div class="strategy-row">
+                  <label>ATR 止损倍数 <input id="atrStopMultiplier" type="number" step="0.1" min="1" max="5" /></label>
+                  <label>VIX 警戒 <input id="vixCautionThreshold" type="number" step="1" min="10" max="95" /></label>
+                </div>
+                <div class="strategy-weights">
+                  <label>趋势权重 <input id="weightTrend" type="number" step="0.1" min="0.1" max="3" /></label>
+                  <label>动量权重 <input id="weightMomentum" type="number" step="0.1" min="0.1" max="3" /></label>
+                  <label>波动权重 <input id="weightVolatility" type="number" step="0.1" min="0.1" max="3" /></label>
+                  <label>量能权重 <input id="weightVolume" type="number" step="0.1" min="0.1" max="3" /></label>
+                  <label>OBV 权重 <input id="weightObv" type="number" step="0.1" min="0.1" max="3" /></label>
+                </div>
+                <label class="toggle">
+                  <input id="useAmaTrendToggle" type="checkbox" checked />
+                  <span>启用 AMA 自适应均线趋势因子</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="panel" id="backtestPanel">
+              <div class="watchlist-header">
+                <h3>策略回测</h3>
+                <button class="secondary small" id="runBacktestBtn" type="button">运行回测</button>
+              </div>
+              <div class="backtest-stats" id="backtestStats">
+                <div class="empty">点击运行回测查看收益统计</div>
+              </div>
+              <canvas id="backtestChart"></canvas>
+            </div>
+
+            <div class="panel" id="insightPanel">
+              <div class="watchlist-header">
+                <h3>AI 投研解读</h3>
+                <button class="secondary small" id="runInsightBtn" type="button">生成解读</button>
+              </div>
+              <div class="insight-content" id="insightContent">
+                <div class="empty">结合技术面与新闻生成解读（无 API Key 时使用演示模式）</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="watchlist-header">
+                <h3>自选股</h3>
+                <span class="meta" id="watchlistCount">0 只</span>
+              </div>
+              <div class="watchlist-chips" id="watchlistChips">
+                <div class="empty">加载中...</div>
+              </div>
+              <div class="toolbar watch-toolbar">
+                <input id="watchInput" type="text" placeholder="输入代码添加，如 600519" />
+                <button class="secondary" id="addWatchBtn" type="button">添加</button>
+              </div>
+              <div class="watch-actions">
+                <button class="secondary small add-current-watch-btn" id="addCurrentWatchBtn" type="button">加入当前股</button>
+                <button class="secondary small" id="keepOnlyCurrentBtn" type="button">仅保留当前股</button>
+                <button id="batchBtn" type="button">批量分析</button>
+                <button class="secondary small" id="clearWatchBtn" type="button">清空自选</button>
+              </div>
+              <p class="watch-note">自选股与监控设置保存在本地 SQLite 数据库；点击代码旁 × 可删除</p>
+              <div class="monitor-controls compact-monitor">
+                <label class="toggle">
+                  <input id="monitorToggle" type="checkbox" checked />
+                  <span>自动监控</span>
+                </label>
+                <select id="monitorInterval">
+                  <option value="30">30 秒</option>
+                  <option value="60" selected>60 秒</option>
+                  <option value="300">5 分钟</option>
+                </select>
+              </div>
+              <label class="toggle notify-toggle">
+                <input id="notifyToggle" type="checkbox" />
+                <span>信号变化浏览器通知</span>
+              </label>
+              <div class="watchlist" id="watchlist">
+                <div class="empty">点击批量分析查看结果</div>
+              </div>
+            </div>
+          </aside>
+
+          <main class="main">
+            <div class="panel chart-card">
+              <div class="chart-toolbar">
+                <div>
+                  <h3>K 线与均线</h3>
+                  <p class="chart-hint">滚轮缩放 · 拖拽平移 · ← → 切换 · 绿色▲买入 红色▼卖出</p>
+                </div>
+                <div class="chart-controls">
+                  <label class="toggle">
+                    <input id="showTradeMarkersToggle" type="checkbox" checked />
+                    <span>买卖点</span>
+                  </label>
+                  <label class="toggle">
+                    <input id="showAmaToggle" type="checkbox" checked />
+                    <span>AMA均线</span>
+                  </label>
+                  <label class="toggle">
+                    <input id="showBollToggle" type="checkbox" />
+                    <span>叠加布林带</span>
+                  </label>
+                  <button class="secondary small" id="resetZoomBtn" type="button">重置缩放</button>
+                </div>
+              </div>
+              <div class="crosshair-info" id="crosshairInfo">移动鼠标到图表上查看数据，或使用 ← → 键逐根切换 K 线</div>
+              <div class="chart-empty" id="priceChartEmpty">正在加载 K 线...</div>
+              <canvas id="priceChart"></canvas>
+            </div>
+
+            <div class="panel chart-card">
+              <div class="chart-tabs">
+                <button class="secondary active" data-chart="macd">MACD</button>
+                <button class="secondary" data-chart="rsi">RSI</button>
+                <button class="secondary" data-chart="boll">布林带</button>
+                <button class="secondary" data-chart="volume">成交量</button>
+                <button class="secondary" data-chart="obv">OBV</button>
+                <button class="secondary" data-chart="kdj">KDJ</button>
+              </div>
+              <div class="chart-empty" id="indicatorChartEmpty"></div>
+              <canvas id="indicatorChart"></canvas>
+            </div>
+
+            <div class="panel chart-card">
+              <div class="chart-toolbar">
+                <div>
+                  <h3>分时走势与指标</h3>
+                  <p class="chart-hint" id="intradayHint">5 分钟 K 线 · RSI · VWAP 均价线</p>
+                </div>
+                <div class="chart-controls">
+                  <select id="intradayPeriod">
+                    <option value="5m" selected>5 分钟</option>
+                    <option value="15m">15 分钟</option>
+                    <option value="30m">30 分钟</option>
+                    <option value="60m">60 分钟</option>
+                  </select>
+                  <button class="secondary small" id="refreshIntradayBtn" type="button">刷新分时</button>
+                </div>
+              </div>
+              <div class="intraday-summary" id="intradaySummary">选择股票后加载分时数据</div>
+              <canvas id="intradayChart"></canvas>
+            </div>
+
+            <div class="panel chart-card">
+              <div class="chart-toolbar">
+                <div>
+                  <h3>多股收益对比</h3>
+                  <p class="chart-hint">归一化走势（起点 = 100），对比自选股区间强弱</p>
+                </div>
+                <button class="secondary small" id="compareBtn" type="button">刷新对比</button>
+              </div>
+              <canvas id="compareChart"></canvas>
+            </div>
+          </main>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
